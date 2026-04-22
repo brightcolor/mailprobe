@@ -1,6 +1,6 @@
 ﻿services:
   mailprobe:
-    image: ${MAILPROBE_IMAGE:-ghcr.io/REPLACE_OWNER/REPLACE_REPO:latest}
+    image: ${MAILPROBE_IMAGE:-ghcr.io/brightcolor/mailprobe:latest}
     pull_policy: always
     container_name: mailprobe
     env_file:
