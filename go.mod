@@ -1,4 +1,4 @@
-﻿module github.com/brightcolor/mailprobe
+module github.com/brightcolor/mailprobe
 
 go 1.23
 
