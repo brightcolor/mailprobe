@@ -1,0 +1,25 @@
+﻿services:
+  mailprobe:
+    image: ${MAILPROBE_IMAGE:-ghcr.io/REPLACE_OWNER/REPLACE_REPO:latest}
+    pull_policy: always
+    container_name: mailprobe
+    env_file:
+      - .env
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+      - "${SMTP_PORT:-2525}:2525"
+    volumes:
+      - mailprobe_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    mem_limit: 512m
+    cpus: 0.50
+
+volumes:
+  mailprobe_data:
+    driver: local

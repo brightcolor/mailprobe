@@ -1,0 +1,8 @@
+﻿services:
+  spamd:
+    image: kaiofelixde/spamassassin:latest
+    container_name: mailprobe-spamd
+    restart: unless-stopped
+    expose:
+      - "783"
+    mem_limit: 256m

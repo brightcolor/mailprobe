@@ -1,0 +1,34 @@
+﻿{{define "home"}}
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{{.AppName}} - E-Mail Deliverability Check</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/">{{.AppName}}</a></header>
+  <main class="container">
+    <section class="card hero">
+      <h1>Prüfe Zustellbarkeit und Spam-Signale deiner E-Mail</h1>
+      <p>Erzeuge eine temporäre Testadresse, sende deine Kampagne dorthin und erhalte einen transparenten Report mit Score, Einzelchecks und Verbesserungen.</p>
+      <form method="post" action="/api/mailboxes">
+        <button class="btn" type="submit">Neue Testadresse erzeugen</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>So funktioniert es</h2>
+      <ol>
+        <li>Testadresse erzeugen</li>
+        <li>E-Mail an die Adresse senden</li>
+        <li>Mailbox-Seite aktualisiert automatisch</li>
+        <li>Detailreport mit Prüfungen abrufen</li>
+      </ol>
+      <p class="hint">Domain für SMTP-Empfang: <code>{{.Domain}}</code></p>
+    </section>
+  </main>
+</body>
+</html>
+{{end}}

@@ -1,0 +1,14 @@
+﻿# keep build context small
+.git
+.gitignore
+.env
+.env.*
+*.db
+*.db-shm
+*.db-wal
+/data
+/bin
+.vscode
+.idea
+README.md
+CHANGELOG.md

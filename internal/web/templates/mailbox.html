@@ -1,0 +1,67 @@
+﻿{{define "mailbox"}}
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mailbox {{.Mailbox.Token}} - {{.AppName}}</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+<header class="topbar"><a class="brand" href="/">{{.AppName}}</a></header>
+<main class="container">
+  <section class="card">
+    <h1>Deine Testadresse</h1>
+    <p class="big-code"><code id="mail-address">{{.Mailbox.Address}}</code></p>
+    <p>Sende deine E-Mail an diese Adresse und warte auf den Report.</p>
+    <div class="actions">
+      <button class="btn" onclick="copyAddress()">Adresse kopieren</button>
+      <a class="btn muted" href="/">Neue Adresse</a>
+    </div>
+    <p class="hint">Gültig bis: {{.Mailbox.ExpiresAt.Format "2006-01-02 15:04:05 MST"}}</p>
+    <p class="hint">Direktlink: <a href="{{.PublicURL}}/mailbox/{{.Mailbox.Token}}">{{.PublicURL}}/mailbox/{{.Mailbox.Token}}</a></p>
+  </section>
+
+  <section class="card" id="status-card" data-token="{{.Mailbox.Token}}">
+    <h2>Status</h2>
+    <p id="status-text">Warte auf eingehende E-Mail ...</p>
+  </section>
+
+  <section class="card">
+    <h2>Empfangene Nachrichten</h2>
+    {{if .Messages}}
+      <table>
+        <thead>
+        <tr>
+          <th>Zeit</th>
+          <th>Subject</th>
+          <th>Von</th>
+          <th>Score</th>
+          <th>Aktion</th>
+        </tr>
+        </thead>
+        <tbody>
+        {{range .Messages}}
+        <tr>
+          <td>{{.Message.ReceivedAt.Format "2006-01-02 15:04:05"}}</td>
+          <td>{{if .Message.Subject}}{{.Message.Subject}}{{else}}(kein Betreff){{end}}</td>
+          <td><code>{{.Message.SMTPFrom}}</code></td>
+          <td>{{if .Report}}{{printf "%.1f" .Report.Score}} / 10{{else}}-{{end}}</td>
+          <td>
+            {{if .Report}}<a href="/report/{{.Report.ID}}">Report</a>{{else}}in Analyse{{end}}
+            | <a href="/raw/{{.Message.ID}}/headers" target="_blank">Header</a>
+            | <a href="/raw/{{.Message.ID}}/source" target="_blank">Raw</a>
+          </td>
+        </tr>
+        {{end}}
+        </tbody>
+      </table>
+    {{else}}
+      <p>Noch keine E-Mails empfangen.</p>
+    {{end}}
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
+{{end}}

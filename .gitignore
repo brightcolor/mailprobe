@@ -1,0 +1,19 @@
+﻿# Binaries
+/bin/
+*.exe
+*.out
+
+# Runtime
+.env
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Go build cache
+coverage.out
+
+# Editors
+.vscode/
+.idea/
+.DS_Store
