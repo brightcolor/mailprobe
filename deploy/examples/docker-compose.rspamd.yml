@@ -1,0 +1,8 @@
+services:
+  rspamd:
+    image: rspamd/rspamd:latest
+    container_name: mailprobe-rspamd
+    restart: unless-stopped
+    expose:
+      - "11334"
+    mem_limit: 256m

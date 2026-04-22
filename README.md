@@ -58,6 +58,7 @@ This project is intentionally built for small VPS setups (including ~1 GB RAM en
   - Newsletter hints: List-Unsubscribe / preheader heuristics
 - Optional RBL checks (disabled by default)
 - Optional SpamAssassin integration (disabled by default)
+- Optional Rspamd integration (disabled by default)
 
 ## Non-goals
 
@@ -119,6 +120,8 @@ See examples:
 
 - `deploy/examples/nginx.conf`
 - `deploy/examples/Caddyfile`
+- `deploy/examples/docker-compose.rspamd.yml`
+- `deploy/examples/docker-compose.spamassassin.yml`
 
 ## Configuration
 
@@ -139,6 +142,7 @@ Important variables:
 - `SMTP_RATE_LIMIT_PER_HOUR`
 - `ENABLE_RBL_CHECKS`, `RBL_PROVIDERS`
 - `ENABLE_SPAMASSASSIN`, `SPAMASSASSIN_HOSTPORT`
+- `ENABLE_RSPAMD`, `RSPAMD_URL`, `RSPAMD_PASSWORD`
 
 ## Security model
 
@@ -206,7 +210,7 @@ Current compose limits are conservative:
 - `mem_limit: 512m`
 - `cpus: 0.50`
 
-Optional checks (RBL, SpamAssassin) increase resource usage and latency.
+Optional checks (RBL, SpamAssassin, Rspamd) increase resource usage and latency.
 
 ## Current limitations
 

@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"context"
@@ -41,10 +41,13 @@ func main() {
 
 	st := store.New(database)
 	engine := analyzer.New(analyzer.Options{
-		EnableRBLChecks:     cfg.EnableRBLChecks,
-		RBLProviders:        cfg.RBLProviders,
-		EnableSpamAssassin:  cfg.EnableSpamAssassin,
+		EnableRBLChecks:      cfg.EnableRBLChecks,
+		RBLProviders:         cfg.RBLProviders,
+		EnableSpamAssassin:   cfg.EnableSpamAssassin,
 		SpamAssassinHostPort: cfg.SpamAssassinHostPort,
+		EnableRspamd:         cfg.EnableRspamd,
+		RspamdURL:            cfg.RspamdURL,
+		RspamdPassword:       cfg.RspamdPassword,
 	})
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to this project will be documented in this file.
 
@@ -14,3 +14,4 @@ All notable changes to this project will be documented in this file.
 - Reverse proxy examples for NGINX and Caddy.
 - Documentation, environment template, and MIT license.
 - GitHub Actions CI for tests and multi-arch container publishing to GHCR.
+- Optional Rspamd integration via controller API (`/checkv2`) with report scoring.

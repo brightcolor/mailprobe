@@ -1,4 +1,4 @@
-﻿package config
+package config
 
 import (
 	"fmt"
@@ -27,6 +27,9 @@ type Config struct {
 	RBLProviders         []string
 	EnableSpamAssassin   bool
 	SpamAssassinHostPort string
+	EnableRspamd         bool
+	RspamdURL            string
+	RspamdPassword       string
 	TrustedProxyCIDRs    []string
 }
 
@@ -50,6 +53,9 @@ func Load() (Config, error) {
 		RBLProviders:         splitCSV(getEnv("RBL_PROVIDERS", "zen.spamhaus.org,bl.spamcop.net")),
 		EnableSpamAssassin:   getEnvBool("ENABLE_SPAMASSASSIN", false),
 		SpamAssassinHostPort: getEnv("SPAMASSASSIN_HOSTPORT", "spamd:783"),
+		EnableRspamd:         getEnvBool("ENABLE_RSPAMD", false),
+		RspamdURL:            getEnv("RSPAMD_URL", "http://rspamd:11334/checkv2"),
+		RspamdPassword:       getEnv("RSPAMD_PASSWORD", ""),
 		TrustedProxyCIDRs:    splitCSV(getEnv("TRUSTED_PROXY_CIDRS", "")),
 	}
 

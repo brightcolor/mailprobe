@@ -1,14 +1,18 @@
-﻿package analyzer
+package analyzer
 
 import (
+	"bytes"
 	"bufio"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
 	"mime"
 	"mime/multipart"
 	"net"
 	"net/mail"
+	"net/http"
 	"net/textproto"
 	"net/url"
 	"regexp"
@@ -23,10 +27,13 @@ import (
 )
 
 type Options struct {
-	EnableRBLChecks bool
-	RBLProviders    []string
-	EnableSpamAssassin bool
+	EnableRBLChecks      bool
+	RBLProviders         []string
+	EnableSpamAssassin   bool
 	SpamAssassinHostPort string
+	EnableRspamd         bool
+	RspamdURL            string
+	RspamdPassword       string
 }
 
 type Input struct {
@@ -227,6 +234,9 @@ func (e *Engine) Analyze(ctx context.Context, in Input) model.AnalysisReport {
 	}
 	if e.opts.EnableSpamAssassin && strings.TrimSpace(e.opts.SpamAssassinHostPort) != "" {
 		report.Checks = append(report.Checks, spamAssassinHeuristic(ctx, e.opts.SpamAssassinHostPort, in.Message.RawSource))
+	}
+	if e.opts.EnableRspamd && strings.TrimSpace(e.opts.RspamdURL) != "" {
+		report.Checks = append(report.Checks, rspamdHeuristic(ctx, e.opts.RspamdURL, e.opts.RspamdPassword, in.Message.RawSource))
 	}
 
 	for _, c := range report.Checks {
@@ -692,6 +702,60 @@ func spamAssassinHeuristic(ctx context.Context, hostport, raw string) model.Chec
 		return pass("spamassassin", "SpamAssassin", 0.2, spamLine, "")
 	}
 	return info("spamassassin", "SpamAssassin", 0.0, "SpamAssassin Antwort ohne klassisches Spam-Headerformat erhalten.", "")
+}
+
+type rspamdCheckResult struct {
+	Score         float64               `json:"score"`
+	RequiredScore float64               `json:"required_score"`
+	Action        string                `json:"action"`
+	Symbols       map[string]any        `json:"symbols"`
+}
+
+func rspamdHeuristic(ctx context.Context, endpointURL, password, raw string) model.CheckResult {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL, bytes.NewBufferString(raw))
+	if err != nil {
+		return info("rspamd", "Rspamd", 0.0, "Rspamd request build failed.", "Check RSPAMD_URL configuration.")
+	}
+	req.Header.Set("Content-Type", "message/rfc822")
+	if strings.TrimSpace(password) != "" {
+		req.Header.Set("Password", password)
+	}
+
+	client := &http.Client{Timeout: 6 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return info("rspamd", "Rspamd", 0.0, "Rspamd not reachable.", "Check Rspamd service availability or disable ENABLE_RSPAMD.")
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 128*1024))
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return info("rspamd", "Rspamd", 0.0, "Rspamd denied access (auth).", "Set correct RSPAMD_PASSWORD or adjust controller auth.")
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return info("rspamd", "Rspamd", 0.0, fmt.Sprintf("Rspamd HTTP status %d.", resp.StatusCode), "Check Rspamd controller endpoint.")
+	}
+
+	var parsed rspamdCheckResult
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return info("rspamd", "Rspamd", 0.0, "Rspamd response parse failed.", "Verify Rspamd endpoint returns JSON (checkv2).")
+	}
+
+	action := strings.ToLower(strings.TrimSpace(parsed.Action))
+	summary := fmt.Sprintf("Rspamd action=%s score=%.2f required=%.2f symbols=%d", emptyFallback(action, "unknown"), parsed.Score, parsed.RequiredScore, len(parsed.Symbols))
+	switch action {
+	case "reject", "soft reject":
+		return fail("rspamd", "Rspamd", -1.2, summary, "Review triggered symbols and sender/content reputation.")
+	case "add header", "rewrite subject", "greylist":
+		return warn("rspamd", "Rspamd", -0.6, summary, "Tune message content and auth alignment to reduce spam signals.")
+	case "no action":
+		return pass("rspamd", "Rspamd", 0.2, summary, "")
+	default:
+		if parsed.RequiredScore > 0 && parsed.Score >= parsed.RequiredScore {
+			return warn("rspamd", "Rspamd", -0.6, summary, "Score is above or equal to required threshold.")
+		}
+		return info("rspamd", "Rspamd", 0.0, summary, "")
+	}
 }
 
 func domainFromDKIM(sig string) string {
