@@ -1,226 +1,226 @@
-﻿# MailProbe
+# MailProbe
 
-MailProbe ist ein selbst hostbarer Open-Source-Service zur Analyse von E-Mail-Zustellbarkeit mit ähnlichem Kern-Workflow wie bekannte Mail-Testing-Dienste: temporäre Adresse erzeugen, Mail empfangen, Report lesen.
+MailProbe is a self-hosted email deliverability test service.
+It accepts test emails on temporary addresses, stores the raw message, runs transparent checks, and shows a report with score + findings.
 
-## 1) Architekturentscheidung (1 GB RAM)
+## Why this design
 
-**Gewählt: Go-Monolith + SQLite + integrierter SMTP-Receiver + SSR-Templates.**
+This project is intentionally built for small VPS setups (including ~1 GB RAM environments):
 
-Kurzbegründung:
-- Go liefert niedrigen Idle-RAM und ein einzelnes Deploy-Artefakt.
-- SQLite spart einen separaten DB-Container und reduziert Betriebsaufwand.
-- Ein Prozess für HTTP + SMTP + Analyse vermeidet Microservice-Overhead.
-- SSR-Frontend (kein SPA-Framework) spart RAM/CPU und bleibt schnell.
+- Single Go binary (HTTP + SMTP + analysis + cleanup)
+- SQLite (no external database service)
+- Server-rendered UI (no heavy frontend framework)
+- Docker Compose deployment (no Kubernetes)
 
-Damit ist der Standardbetrieb auf kleinen 1-GB-VMs realistisch.
+## Core workflow
+
+1. Open the web UI
+2. Generate a random temporary mailbox
+3. Send your campaign/test email to that address
+4. MailProbe receives and stores the message
+5. MailProbe analyzes the message and creates a report
+6. Open the report with score, checks, warnings, and suggestions
 
 ## Features
 
-- Temporäre zufällige Testadressen pro Session/Token
-- SMTP-Empfang für Testadressen
-- Speicherung von Rohmail + Headern + Reports
-- Transparenter Score (0-10) mit Einzelprüfungen
-- Checks u. a. für:
-  - SPF / DKIM / DMARC (Header- und DNS-basiert)
+### Mailbox and intake
+
+- Random temporary mailbox addresses (`<token>@SMTP_DOMAIN`)
+- Multiple active mailboxes in parallel
+- Multiple emails per mailbox
+- Mailbox TTL and automatic expiration
+- Raw source and raw headers view
+
+### Analysis and scoring
+
+- Score from `0.0` to `10.0`
+- Non-black-box scoring model (rule deltas are visible in report)
+- Check categories include:
+  - SPF (header result + DNS context)
+  - DKIM (signature/auth-result heuristics)
+  - DMARC (record + alignment heuristics)
   - PTR/rDNS
-  - HELO/EHLO-Plausibilität
-  - Envelope-From vs Header-From
-  - Return-Path, Received-Kette, ARC-Hinweis
-  - MIME-Struktur, Plaintext-/HTML-Heuristik, Anhänge
-  - Link-Extraktion, Tracking-Hinweise, Shortener-Checks
-  - HTML-Basisanalyse, Spam-/Format-Heuristiken, Unicode-Obfuscation
-  - Newsletter-Checks (List-Unsubscribe, Preheader-Heuristik)
-  - optional DNSBL/RBL (deaktiviert per Default)
-- Auto-Cleanup (TTL/Retention)
-- Basis-Missbrauchsschutz:
-  - Rate Limiting (Web + SMTP)
-  - Mail-Size-Limit
-  - Limit aktiver Mailboxen pro IP
-- Docker Compose, Healthchecks, persistente Volumes
+  - HELO/EHLO plausibility
+  - Envelope-From vs Header-From alignment
+  - Return-Path presence
+  - Received chain presence
+  - ARC presence info
+  - MIME structure and multipart sanity
+  - Plaintext/HTML presence and ratio heuristics
+  - Attachments detection
+  - Link extraction
+  - URL shortener and tracking marker heuristics
+  - Basic HTML sanity / hidden content heuristics
+  - Subject spam-style heuristics (caps / punctuation)
+  - Date header plausibility
+  - Message-ID presence
+  - Unicode obfuscation heuristics
+  - Newsletter hints: List-Unsubscribe / preheader heuristics
+- Optional RBL checks (disabled by default)
+- Optional SpamAssassin integration (disabled by default)
 
-## Architekturübersicht
+## Non-goals
 
-- `cmd/mailprobe/main.go`: App-Bootstrap, HTTP + SMTP + Cleanup
-- `internal/smtp`: schlanker SMTP-Server (nur Inbound-Testzweck)
-- `internal/analyzer`: Analyse-Engine + Scoring
-- `internal/store`, `internal/db`: SQLite-Schema und Persistenz
-- `internal/web`: SSR-UI, API-Endpunkte, statische Assets
-- `internal/cleanup`: periodische Datenbereinigung
+- Not a full production MTA
+- Not an outbound mail relay
+- Not a replacement for enterprise mailbox-provider proprietary filtering engines
 
-Datenfluss:
-1. Nutzer erzeugt Mailbox via Web UI
-2. SMTP nimmt Mail für `<token>@SMTP_DOMAIN` entgegen
-3. Rohmail wird gespeichert
-4. Analyse wird ausgeführt
-5. Report wird gespeichert und im UI angezeigt
+## Architecture
 
-## Voraussetzungen
+- `cmd/mailprobe/main.go`: bootstrap and service wiring
+- `internal/smtp`: lightweight SMTP receiver
+- `internal/analyzer`: parsing + checks + scoring
+- `internal/store`, `internal/db`: SQLite persistence layer
+- `internal/web`: SSR pages + API endpoints
+- `internal/cleanup`: periodic TTL/retention cleanup
+
+Data path:
+
+1. Web creates mailbox in SQLite
+2. SMTP receives message and validates recipient
+3. Message is stored in SQLite
+4. Analyzer builds report
+5. Report is stored and shown in UI
+
+## Requirements
 
 - Docker + Docker Compose
-- VPS mit öffentlicher IP
-- Domain/Subdomain für SMTP-Empfang
-- Port 25 erreichbar oder Weiterleitung auf Host-Port `SMTP_PORT`
+- Public IP VPS
+- Domain/subdomain you control
+- SMTP traffic routed to this host (`25 -> SMTP_PORT` or direct bind)
 
-## Schnellstart
+## Quick start
 
 ```bash
 cp .env.example .env
-# .env anpassen: PUBLIC_BASE_URL, SMTP_DOMAIN, MAILPROBE_IMAGE, Ports
+# edit: PUBLIC_BASE_URL, SMTP_DOMAIN, MAILPROBE_IMAGE, ports
 
-docker compose up -d
-```
-
-Web-UI: `http://<host>:8080` (oder dein Reverse Proxy)
-
-## Docker-Compose Start
-
-```bash
 docker compose pull
 docker compose up -d
-docker compose ps
-docker compose logs -f mailprobe
 ```
 
-Stoppen:
+Open UI:
 
-```bash
-docker compose down
-```
+- `http://<host>:8080` (or your reverse-proxy URL)
 
-## DNS-/SMTP-Hinweise
+## DNS and SMTP setup
 
-Für realistischen Testbetrieb:
-- A/AAAA: `mailprobe.example.org -> VPS`
-- MX für Testdomain/Subdomain:
-  - `mx-test.example.org MX 10 mailprobe.example.org`
-- Optional SPF/DMARC auf Sender-Domain für eigene Testmails
+Example records:
 
-Hinweis: Dieses Projekt ist **kein** vollwertiger Produktions-MTA, sondern eine interne Test-Mailbox-Engine.
+- `A mailprobe.example.org -> <server-ip>`
+- `MX mx-test.example.org 10 mailprobe.example.org`
 
-## Reverse Proxy Beispiel
+Recommended runtime setup:
 
-Siehe:
+- Keep web behind reverse proxy/TLS (`443 -> 8080`)
+- Route SMTP `25` to container SMTP port (`2525` by default)
+
+See examples:
+
 - `deploy/examples/nginx.conf`
 - `deploy/examples/Caddyfile`
 
-Typisches Setup:
-- Proxy terminiert TLS für Web (`:443 -> :8080`)
-- SMTP bleibt direkt auf Host-Port (z. B. `25 -> 2525`)
+## Configuration
 
-## Konfiguration
+Copy `.env.example` and adjust.
 
-Alle relevanten Variablen in `.env.example`.
+Important variables:
 
-Wichtige Parameter:
-- `MAILPROBE_IMAGE`: Registry-Image aus der CI (z. B. `ghcr.io/<owner>/<repo>:latest`)
-- `SMTP_DOMAIN`: Domain, für die Testadressen erzeugt werden
-- `MAX_MESSAGE_BYTES`: Maximalgröße je Mail
-- `MAILBOX_TTL`: Lebensdauer einzelner Testadressen
-- `DATA_RETENTION_TTL`: Aufbewahrung empfangener Daten
-- `WEB_RATE_LIMIT_PER_MIN`, `SMTP_RATE_LIMIT_PER_HOUR`
-- `ENABLE_RBL_CHECKS` + `RBL_PROVIDERS`
-- `ENABLE_SPAMASSASSIN` + `SPAMASSASSIN_HOSTPORT`
+- `MAILPROBE_IMAGE` (default: `ghcr.io/brightcolor/mailprobe:latest`)
+- `PUBLIC_BASE_URL`
+- `SMTP_DOMAIN`
+- `HTTP_PORT`, `SMTP_PORT`
+- `MAX_MESSAGE_BYTES`
+- `MAILBOX_TTL`
+- `DATA_RETENTION_TTL`
+- `CLEANUP_INTERVAL`
+- `MAX_ACTIVE_MAILBOXES_PER_IP`
+- `WEB_RATE_LIMIT_PER_MIN`
+- `SMTP_RATE_LIMIT_PER_HOUR`
+- `ENABLE_RBL_CHECKS`, `RBL_PROVIDERS`
+- `ENABLE_SPAMASSASSIN`, `SPAMASSASSIN_HOSTPORT`
 
-## Sicherheit
+## Security model
 
-- Kein Open Relay: keine externe Weiterleitung/Zustellung implementiert
-- Verarbeitung nur für bekannte temporäre Adressen
-- Rate-Limits für Web und SMTP
-- Mailgrößenlimit
-- Begrenzte aktive Mailboxen pro IP
-- Minimal offene Ports (Web + SMTP)
-- Secrets/Config via `.env`
+Implemented safeguards:
 
-## Persistenz & Backup
+- No open relay behavior
+- SMTP recipient validation against active temporary mailboxes
+- Request and SMTP rate limits
+- Maximum accepted message size
+- Max active mailboxes per client IP
+- TTL-based data lifecycle
 
-Persistente Daten liegen im Docker-Volume `mailprobe_data` (`/data` im Container):
-- SQLite DB (`mailprobe.db`, WAL/SHM)
+Operational recommendations:
 
-Backup (Beispiel):
-- Volume snapshotten oder DB regelmäßig sichern
-- Für konsistente Snapshots kurz stoppen oder SQLite-Backup-Mechanismus nutzen
+- Restrict host firewall to required ports
+- Use reverse proxy with TLS for web access
+- Keep `.env` private and backed up securely
+- Run regular image updates
 
-## Healthchecks
+## Persistence and backup
+
+Data is persisted in Docker volume `mailprobe_data`:
+
+- SQLite database (`/data/mailprobe.db` + WAL/SHM)
+
+Backup options:
+
+- Volume snapshot
+- Periodic DB copy/export during low activity windows
+
+## Health and operations
+
+Health endpoints:
 
 - `GET /healthz`
 - `GET /readyz`
 
-Docker Healthcheck nutzt `/healthz`.
+Useful commands:
 
-## GitHub CI / Container Registry
+```bash
+docker compose ps
+docker compose logs -f mailprobe
+```
 
-Das Repo enthält CI-Workflows unter `.github/workflows`:
-- `ci.yml`
-  - testet das Go-Projekt (`go test ./...`)
-  - baut Multi-Arch-Container (`linux/amd64`, `linux/arm64`)
-  - published bei Push auf `main` oder bei Tag `v*` nach GHCR:
-    - `ghcr.io/<owner>/<repo>:latest` (auf Default-Branch)
-    - `ghcr.io/<owner>/<repo>:vX.Y.Z` (bei Tag)
-    - `ghcr.io/<owner>/<repo>:sha-<commit>`
-- `release.yml`
-  - optionaler manueller Tag-Workflow (`workflow_dispatch`)
+## CI/CD and container publishing
 
-Für GHCR muss im GitHub-Repository Packages-Publishing erlaubt sein (nutzt `GITHUB_TOKEN` mit `packages:write`).
+GitHub Actions workflows are included:
 
-## Ressourcenprofil (1 GB RAM)
+- `.github/workflows/ci.yml`
+  - runs `go test ./...`
+  - builds multi-arch image (`linux/amd64`, `linux/arm64`)
+  - publishes to GHCR on `main` and tags (`v*`)
+- `.github/workflows/release.yml`
+  - optional manual tag creation
 
-Erwartung im Standardbetrieb:
-- 1 Container
-- Idle-RAM typischerweise deutlich unter 200 MB (abhängig von Last und DNS-Lookups)
-- `docker-compose` setzt `mem_limit: 512m` als konservativen Guardrail
+Published image target:
 
-Optionalfeatures mit Mehrbedarf:
-- DNSBL/RBL-Checks erhöhen DNS-Traffic/Latenz
-- SpamAssassin ist optional integrierbar (siehe `deploy/examples/docker-compose.spamassassin.yml`), aber nicht Default, da auf 1 GB oft zu schwer
+- `ghcr.io/brightcolor/mailprobe:<tag>`
 
-## Bekannte Abweichungen / Limitierungen
+## Resource profile (practical)
 
-- DKIM wird standardmäßig heuristisch über Header/Auth-Results bewertet, keine vollständige kryptografische Tiefenverifikation.
-- SPF/DMARC-Ergebnisse basieren auf DNS + vorhandenen Headern, nicht auf vollständiger MTA-Policy-Engine.
-- Kein Cluster/HA-Setup, bewusst einfach und ressourcenschonend.
-- Kein Captcha integriert (leichtgewichtiges Baseline-Setup).
+For standard usage, this is intended to run on small servers.
+Current compose limits are conservative:
+
+- `mem_limit: 512m`
+- `cpus: 0.50`
+
+Optional checks (RBL, SpamAssassin) increase resource usage and latency.
+
+## Current limitations
+
+- DKIM verification is heuristic-oriented (not full cryptographic verifier depth)
+- SPF/DMARC outcomes rely on available headers + DNS lookups, not full receiver-grade policy pipeline
+- Single-node design (no built-in clustering/HA)
 
 ## Roadmap
 
-- Optionale echte DKIM-Signaturverifikation
-- Optionaler SpamAssassin-Sidecar als umschaltbares Compose-Profil
-- Erweiterte Rule-Sets und konfigurierbare Gewichtungen pro Check
-- Optionales API-Token für geschützten Betrieb
-- Exportfunktionen (JSON/PDF)
+- Stronger DKIM verification path
+- More rule configurability via external config
+- Auth-protected/private deployment mode
+- Report export formats
 
-## Projektstruktur
+## License
 
-```text
-.
-├─ cmd/mailprobe
-├─ internal/
-│  ├─ analyzer
-│  ├─ cleanup
-│  ├─ config
-│  ├─ db
-│  ├─ model
-│  ├─ ratelimit
-│  ├─ smtp
-│  ├─ store
-│  └─ web
-├─ deploy/examples
-├─ docker-compose.yml
-├─ Dockerfile
-├─ .env.example
-├─ CHANGELOG.md
-├─ LICENSE
-└─ Makefile
-```
-
-## Entwicklung lokal (ohne Docker)
-
-Go-Toolchain vorausgesetzt:
-
-```bash
-go mod tidy
-go run ./cmd/mailprobe
-```
-
-## Lizenz
-
-MIT (siehe `LICENSE`).
+MIT (see `LICENSE`).
