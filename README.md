@@ -1,5 +1,7 @@
 # MailProbe
 
+Quickstart: `bash <(curl -fsSL https://raw.githubusercontent.com/brightcolor/mailprobe/main/scripts/quickstart.sh)`
+
 MailProbe is a self-hosted email deliverability test service.
 It accepts test emails on temporary addresses, stores the raw message, runs transparent checks, and shows a report with score + findings.
 
@@ -91,6 +93,25 @@ Data path:
 - SMTP traffic routed to this host (`25 -> SMTP_PORT` or direct bind)
 
 ## Quick start
+
+Fully automatic (installs Docker + Docker Compose if missing, no SSL/reverse-proxy setup):
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/brightcolor/mailprobe/main/scripts/quickstart.sh)
+```
+
+Optional environment overrides for the script:
+
+```bash
+INSTALL_DIR=/opt/mailprobe \
+HTTP_PORT=8080 \
+SMTP_PORT=2525 \
+SMTP_DOMAIN=mx-test.example.org \
+PUBLIC_BASE_URL=http://your-server-ip:8080 \
+bash <(curl -fsSL https://raw.githubusercontent.com/brightcolor/mailprobe/main/scripts/quickstart.sh)
+```
+
+Manual setup:
 
 ```bash
 cp .env.example .env

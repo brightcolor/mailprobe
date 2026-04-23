@@ -15,3 +15,4 @@ All notable changes to this project will be documented in this file.
 - Documentation, environment template, and MIT license.
 - GitHub Actions CI for tests and multi-arch container publishing to GHCR.
 - Optional Rspamd integration via controller API (`/checkv2`) with report scoring.
+- Added `scripts/quickstart.sh` to install Docker/Compose (if missing) and deploy MailProbe in one command.
