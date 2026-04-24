@@ -294,7 +294,7 @@ func assignLabel(r *model.AnalysisReport) {
 }
 
 func parseAuthResult(s, key string) string {
-	re := regexp.MustCompile(key + `=([a-zA-Z]+)`)
+	re := regexp.MustCompile(`(?:^|[;\s])` + regexp.QuoteMeta(key) + `=([a-zA-Z]+)`)
 	m := re.FindStringSubmatch(s)
 	if len(m) < 2 {
 		return ""
