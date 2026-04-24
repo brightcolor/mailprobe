@@ -7,7 +7,11 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Added tokenized JSON report export at `GET /api/reports/<mailbox-token>/<message-ref>` for automation and integrations.
 - Added JSON report links to mailbox and report pages.
+- Added a score-first web UI with a guided send-and-check flow, live mailbox status, prioritized report checks, and clearer export actions.
 - Documented `TRUSTED_PROXY_CIDRS` in the environment template and README.
+
+### Changed
+- Redesigned the home, mailbox, and report pages into a more focused email testing workflow with prominent test address, status panels, score summary, diagnostics, and raw data sections.
 
 ### Fixed
 - Only trust `X-Forwarded-For` when the direct client IP matches `TRUSTED_PROXY_CIDRS`, preventing spoofed client IPs from bypassing web rate limits.

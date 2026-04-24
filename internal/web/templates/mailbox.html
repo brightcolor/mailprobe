@@ -12,72 +12,85 @@
 <header class="topbar navbar navbar-expand-lg">
   <div class="container-fluid px-0">
     <a class="brand navbar-brand" href="/">{{.AppName}}</a>
-    <span class="topbar-note ms-auto">Temporary mailbox • vibe-coded</span>
+    <nav class="topbar-nav ms-auto" aria-label="Main">
+      <a href="/">Neuer Test</a>
+      <a href="/metrics">Metrics</a>
+    </nav>
   </div>
 </header>
 
 <main class="container">
-  <section class="card address-card">
-    <div class="address-head">
-      <h1>Deine Testadresse</h1>
-      <a class="btn muted" href="/">Neue Adresse</a>
+  <section class="mailbox-layout">
+    <div class="test-panel compact">
+      <p class="eyebrow">Aktive Testadresse</p>
+      <h1>Warte auf deine E-Mail</h1>
+      <div class="address-box">
+        <span class="address-label">Empfaenger</span>
+        <code id="mail-address">{{.Mailbox.Address}}</code>
+        <button class="icon-btn copy-btn" type="button" onclick="copyAddress()" title="Adresse kopieren" aria-label="Adresse kopieren">Copy</button>
+      </div>
+      <div class="primary-actions">
+        <a class="btn secondary" href="/">Neue Adresse</a>
+      </div>
+      <dl class="meta-list inline">
+        <div>
+          <dt>Gueltig bis</dt>
+          <dd>{{.Mailbox.ExpiresAt.Format "2006-01-02 15:04:05 MST"}}</dd>
+        </div>
+        <div>
+          <dt>Direktlink</dt>
+          <dd><a href="{{.PublicURL}}/mailbox/{{.Mailbox.Token}}">{{.PublicURL}}/mailbox/{{.Mailbox.Token}}</a></dd>
+        </div>
+      </dl>
     </div>
-    <p class="big-code"><code id="mail-address">{{.Mailbox.Address}}</code></p>
-    <p>Sende deine E-Mail an diese Adresse. Nach Eingang wird die Seite automatisch aktualisiert.</p>
-    <div class="actions">
-      <button class="btn" onclick="copyAddress()">Adresse kopieren</button>
-    </div>
-    <div class="meta-grid">
-      <p class="hint">Gueltig bis: {{.Mailbox.ExpiresAt.Format "2006-01-02 15:04:05 MST"}}</p>
-      <p class="hint">Direktlink: <a href="{{.PublicURL}}/mailbox/{{.Mailbox.Token}}">{{.PublicURL}}/mailbox/{{.Mailbox.Token}}</a></p>
-    </div>
+
+    <aside class="status-panel" id="status-card" data-token="{{.Mailbox.Token}}" data-latest-message-id="{{if .Messages}}{{(index .Messages 0).Message.ID}}{{else}}0{{end}}">
+      <span class="status-dot"></span>
+      <h2>Live Status</h2>
+      <p id="status-text">Warte auf eingehende E-Mail ...</p>
+    </aside>
   </section>
 
-  <section class="card status-card" id="status-card" data-token="{{.Mailbox.Token}}" data-latest-message-id="{{if .Messages}}{{(index .Messages 0).Message.ID}}{{else}}0{{end}}">
-    <h2>Status</h2>
-    <p id="status-text">Warte auf eingehende E-Mail ...</p>
-  </section>
-
-  <section class="card">
+  <section class="section-band">
     <div class="table-head">
-      <h2>Empfangene Nachrichten</h2>
+      <div>
+        <p class="eyebrow">Posteingang</p>
+        <h2>Empfangene Nachrichten</h2>
+      </div>
       <span class="hint">Neueste zuerst</span>
     </div>
 
     {{if .Messages}}
-      <div class="table-wrap">
-        <table class="table table-borderless align-middle">
-          <thead>
-          <tr>
-            <th>Zeit</th>
-            <th>Subject</th>
-            <th>Von</th>
-            <th>Score</th>
-            <th>Aktion</th>
-          </tr>
-          </thead>
-          <tbody>
-          {{range .Messages}}
-          <tr>
-            <td>{{.Message.ReceivedAt.Format "2006-01-02 15:04:05"}}</td>
-            <td>{{if .Message.Subject}}{{.Message.Subject}}{{else}}(kein Betreff){{end}}</td>
-            <td><code>{{.Message.SMTPFrom}}</code></td>
-            <td>{{if .Report}}{{printf "%.1f" .Report.Score}} / 10{{else}}-{{end}}</td>
-            <td>
-              {{if .Report}}<a href="/report/{{$.Mailbox.Token}}?msg={{msgref $.Mailbox.Token .Message.ID}}">Report</a>{{else}}in Analyse{{end}}
-              | <a href="/raw/{{$.Mailbox.Token}}/{{msgref $.Mailbox.Token .Message.ID}}/headers" target="_blank">Header</a>
-              | <a href="/raw/{{$.Mailbox.Token}}/{{msgref $.Mailbox.Token .Message.ID}}/source" target="_blank">Raw</a>
-              {{if .Report}} | <a href="/api/reports/{{$.Mailbox.Token}}/{{msgref $.Mailbox.Token .Message.ID}}" target="_blank">JSON</a>{{end}}
-            </td>
-          </tr>
-          {{end}}
-          </tbody>
-        </table>
+      <div class="message-list">
+        {{range .Messages}}
+        <article class="message-row">
+          <div>
+            <time>{{.Message.ReceivedAt.Format "2006-01-02 15:04:05"}}</time>
+            <h3>{{if .Message.Subject}}{{.Message.Subject}}{{else}}(kein Betreff){{end}}</h3>
+            <p><code>{{.Message.SMTPFrom}}</code></p>
+          </div>
+          <div class="message-score">
+            {{if .Report}}
+              <strong>{{printf "%.1f" .Report.Score}}</strong><span>/10</span>
+            {{else}}
+              <strong>-</strong><span>Analyse</span>
+            {{end}}
+          </div>
+          <nav class="row-actions" aria-label="Nachrichtenaktionen">
+            {{if .Report}}<a href="/report/{{$.Mailbox.Token}}?msg={{msgref $.Mailbox.Token .Message.ID}}">Report</a>{{else}}<span>in Analyse</span>{{end}}
+            <a href="/raw/{{$.Mailbox.Token}}/{{msgref $.Mailbox.Token .Message.ID}}/headers" target="_blank">Header</a>
+            <a href="/raw/{{$.Mailbox.Token}}/{{msgref $.Mailbox.Token .Message.ID}}/source" target="_blank">Raw</a>
+            {{if .Report}}<a href="/api/reports/{{$.Mailbox.Token}}/{{msgref $.Mailbox.Token .Message.ID}}" target="_blank">JSON</a>{{end}}
+          </nav>
+        </article>
+        {{end}}
       </div>
     {{else}}
-      <p>Noch keine E-Mails empfangen.</p>
+      <div class="empty-state">
+        <strong>Noch keine E-Mail empfangen.</strong>
+        <p>Diese Seite aktualisiert sich automatisch, sobald eine Nachricht eingeht.</p>
+      </div>
     {{end}}
-    <p class="vibe-note">Vibe-coded workflow: mailbox intake and analysis kept intentionally lightweight.</p>
   </section>
 </main>
 <script src="/static/vendor/bootstrap.bundle.min.js"></script>

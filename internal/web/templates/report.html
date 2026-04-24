@@ -12,35 +12,113 @@
 <header class="topbar navbar navbar-expand-lg">
   <div class="container-fluid px-0">
     <a class="brand navbar-brand" href="/">{{.AppName}}</a>
-    <span class="topbar-note ms-auto">Analysis report • vibe-coded</span>
+    <nav class="topbar-nav ms-auto" aria-label="Main">
+      <a href="/mailbox/{{.Mailbox.Token}}">Mailbox</a>
+      <a href="/">Neuer Test</a>
+    </nav>
   </div>
 </header>
 
 <main class="container">
-  <section class="card score-card">
-    <div class="score-layout">
-      <div class="score-ring" style="--score: {{printf "%.1f" .Report.Score}};">
-        <div class="score-ring-inner">
-          <div class="score">{{printf "%.1f" .Report.Score}}<span>/10</span></div>
-          <p class="score-label">{{.Report.ScoreLabel}}</p>
-        </div>
+  <section class="report-hero">
+    <div class="score-ring" style="--score: {{printf "%.1f" .Report.Score}};">
+      <div class="score-ring-inner">
+        <div class="score">{{printf "%.1f" .Report.Score}}<span>/10</span></div>
+        <p class="score-label">{{.Report.ScoreLabel}}</p>
       </div>
-      <div>
-        <h1>Deliverability Score</h1>
-        <div class="badges">
-          <span class="badge pass">Pass: {{index .Statuses "pass"}}</span>
-          <span class="badge warn">Warn: {{index .Statuses "warn"}}</span>
-          <span class="badge fail">Fail: {{index .Statuses "fail"}}</span>
-          <span class="badge info">Info: {{index .Statuses "info"}}</span>
-        </div>
-        <p class="hint">Mailbox: <a href="/mailbox/{{.Mailbox.Token}}">{{.Mailbox.Address}}</a></p>
+    </div>
+    <div class="report-summary">
+      <p class="eyebrow">Deliverability Report</p>
+      <h1>Analyse fuer {{.Mailbox.Address}}</h1>
+      <p class="lead">{{.Message.Subject}}</p>
+      <div class="badges">
+        <span class="badge pass">Pass {{index .Statuses "pass"}}</span>
+        <span class="badge warn">Warn {{index .Statuses "warn"}}</span>
+        <span class="badge fail">Fail {{index .Statuses "fail"}}</span>
+        <span class="badge info">Info {{index .Statuses "info"}}</span>
+      </div>
+      <div class="primary-actions">
+        <a class="btn primary" href="/mailbox/{{.Mailbox.Token}}">Zur Mailbox</a>
+        <a class="btn secondary" href="/api/reports/{{.Mailbox.Token}}/{{msgref .Mailbox.Token .Message.ID}}" target="_blank">JSON Export</a>
       </div>
     </div>
   </section>
 
-  <section class="card">
-    <h2>Mail Views & Raw Data</h2>
-    <p class="hint">Quick inspection of decoded content and original transport data.</p>
+  <section class="diagnostic-grid">
+    <article>
+      <span class="pill fail">fail</span>
+      <strong>{{index .Statuses "fail"}} kritische Punkte</strong>
+    </article>
+    <article>
+      <span class="pill warn">warn</span>
+      <strong>{{index .Statuses "warn"}} Warnungen</strong>
+    </article>
+    <article>
+      <span class="pill pass">pass</span>
+      <strong>{{index .Statuses "pass"}} bestandene Checks</strong>
+    </article>
+    <article>
+      <span class="pill info">info</span>
+      <strong>{{index .Statuses "info"}} Hinweise</strong>
+    </article>
+  </section>
+
+  <section class="section-band">
+    <div class="table-head">
+      <div>
+        <p class="eyebrow">Diagnose</p>
+        <h2>Einzelpruefungen</h2>
+      </div>
+    </div>
+    <div class="check-list">
+      {{range .Report.Checks}}
+      <article class="check-row {{.Status}}">
+        <div class="check-status-cell"><span class="pill {{.Status}}">{{.Status}}</span></div>
+        <div>
+          <h3>{{.Name}} <code>{{.ID}}</code></h3>
+          <p>{{.Summary}}</p>
+          {{if .Suggestion}}<p class="suggestion">{{.Suggestion}}</p>{{end}}
+        </div>
+        <strong class="delta">{{printf "%+.1f" .ScoreDelta}}</strong>
+      </article>
+      {{end}}
+    </div>
+  </section>
+
+  <section class="two-column">
+    {{if .Report.Suggestions}}
+    <article class="section-band">
+      <p class="eyebrow">Naechste Schritte</p>
+      <h2>Verbesserungsvorschlaege</h2>
+      <ul class="clean-list">
+        {{range .Report.Suggestions}}<li>{{.}}</li>{{end}}
+      </ul>
+    </article>
+    {{end}}
+
+    {{if .Report.SpamSignals}}
+    <article class="section-band">
+      <p class="eyebrow">Risiko</p>
+      <h2>Spam-Indikatoren</h2>
+      <ul class="clean-list">
+        {{range .Report.SpamSignals}}<li>{{.}}</li>{{end}}
+      </ul>
+    </article>
+    {{end}}
+  </section>
+
+  <section class="section-band">
+    <div class="table-head">
+      <div>
+        <p class="eyebrow">Inhalt</p>
+        <h2>Mail Views & Raw Data</h2>
+      </div>
+      <nav class="row-actions" aria-label="Downloads">
+        <a href="/raw/{{.Mailbox.Token}}/{{msgref .Mailbox.Token .Message.ID}}/headers" target="_blank">Header</a>
+        <a href="/raw/{{.Mailbox.Token}}/{{msgref .Mailbox.Token .Message.ID}}/source" target="_blank">Raw</a>
+        <a href="/api/reports/{{.Mailbox.Token}}/{{msgref .Mailbox.Token .Message.ID}}" target="_blank">JSON</a>
+      </nav>
+    </div>
     <div class="accordion" id="rawAccordion">
       <div class="accordion-item">
         <h3 class="accordion-header">
@@ -50,11 +128,7 @@
         </h3>
         <div id="plainTextView" class="accordion-collapse collapse" data-bs-parent="#rawAccordion">
           <div class="accordion-body">
-            {{if .PlainTextBody}}
-            <pre class="raw-block">{{.PlainTextBody}}</pre>
-            {{else}}
-            <p class="hint">No plaintext body found.</p>
-            {{end}}
+            {{if .PlainTextBody}}<pre class="raw-block">{{.PlainTextBody}}</pre>{{else}}<p class="hint">No plaintext body found.</p>{{end}}
           </div>
         </div>
       </div>
@@ -66,11 +140,7 @@
         </h3>
         <div id="htmlSourceView" class="accordion-collapse collapse" data-bs-parent="#rawAccordion">
           <div class="accordion-body">
-            {{if .HTMLSourceBody}}
-            <pre class="raw-block">{{.HTMLSourceBody}}</pre>
-            {{else}}
-            <p class="hint">No HTML body found.</p>
-            {{end}}
+            {{if .HTMLSourceBody}}<pre class="raw-block">{{.HTMLSourceBody}}</pre>{{else}}<p class="hint">No HTML body found.</p>{{end}}
           </div>
         </div>
       </div>
@@ -81,9 +151,7 @@
           </button>
         </h3>
         <div id="rawHeaders" class="accordion-collapse collapse" data-bs-parent="#rawAccordion">
-          <div class="accordion-body">
-            <pre class="raw-block">{{.Message.HeaderBlock}}</pre>
-          </div>
+          <div class="accordion-body"><pre class="raw-block">{{.Message.HeaderBlock}}</pre></div>
         </div>
       </div>
       <div class="accordion-item">
@@ -93,64 +161,21 @@
           </button>
         </h3>
         <div id="rawSource" class="accordion-collapse collapse" data-bs-parent="#rawAccordion">
-          <div class="accordion-body">
-            <pre class="raw-block">{{.Message.RawSource}}</pre>
-          </div>
+          <div class="accordion-body"><pre class="raw-block">{{.Message.RawSource}}</pre></div>
         </div>
       </div>
     </div>
-    <p class="hint mt-3">Optional Download: <a href="/raw/{{.Mailbox.Token}}/{{msgref .Mailbox.Token .Message.ID}}/headers" target="_blank">Header</a> | <a href="/raw/{{.Mailbox.Token}}/{{msgref .Mailbox.Token .Message.ID}}/source" target="_blank">Raw</a> | <a href="/api/reports/{{.Mailbox.Token}}/{{msgref .Mailbox.Token .Message.ID}}" target="_blank">JSON</a></p>
   </section>
 
-  <section class="card">
-    <h2>Einzelpruefungen</h2>
-    <div class="table-wrap">
-      <table class="table table-borderless align-middle">
-        <thead>
-        <tr><th>Status</th><th>Rule ID</th><th>Check</th><th>Bewertung</th><th>Details</th><th>Empfehlung</th></tr>
-        </thead>
-        <tbody>
-        {{range .Report.Checks}}
-        <tr>
-          <td><span class="pill {{.Status}}">{{.Status}}</span></td>
-          <td><code>{{.ID}}</code></td>
-          <td>{{.Name}}</td>
-          <td>{{printf "%+.1f" .ScoreDelta}}</td>
-          <td>{{.Summary}}</td>
-          <td>{{.Suggestion}}</td>
-        </tr>
-        {{end}}
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  {{if .Report.Suggestions}}
-  <section class="card">
-    <h2>Verbesserungsvorschlaege</h2>
-    <ul>
-      {{range .Report.Suggestions}}<li>{{.}}</li>{{end}}
-    </ul>
-  </section>
-  {{end}}
-
-  {{if .Report.SpamSignals}}
-  <section class="card">
-    <h2>Spam-Indikatoren</h2>
-    <ul>{{range .Report.SpamSignals}}<li>{{.}}</li>{{end}}</ul>
-  </section>
-  {{end}}
-
-  <section class="card">
-    <h2>Links</h2>
+  <section class="section-band">
+    <p class="eyebrow">Links</p>
+    <h2>Erkannte URLs</h2>
     {{if .Report.Links}}
-    <ul>
+    <ul class="clean-list link-list">
       {{range .Report.Links}}<li><a href="{{.}}" target="_blank" rel="noopener">{{.}}</a></li>{{end}}
     </ul>
     {{else}}<p>Keine Links erkannt.</p>{{end}}
-    <p class="vibe-note">This report UI is vibe-coded: readable first, explainable scoring, minimal friction.</p>
   </section>
-
 </main>
 
 <script src="/static/vendor/bootstrap.bundle.min.js"></script>

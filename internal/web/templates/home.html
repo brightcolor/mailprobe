@@ -12,44 +12,92 @@
   <header class="topbar navbar navbar-expand-lg">
     <div class="container-fluid px-0">
       <a class="brand navbar-brand" href="/">{{.AppName}}</a>
-      <span class="topbar-note ms-auto">E-Mail Testing • vibe-coded</span>
+      <nav class="topbar-nav ms-auto" aria-label="Main">
+        <a href="#check-panel">Test</a>
+        <a href="/metrics">Metrics</a>
+        <a href="/healthz">Health</a>
+      </nav>
     </div>
   </header>
 
-<main class="container">
-    <section class="card tester-card" id="check-panel" data-token="{{.Mailbox.Token}}">
-      <h1>Teste deinen E-Mail Score</h1>
-      <p class="hint">Jeder Seitenaufruf erzeugt automatisch eine neue Testadresse. Sende deine E-Mail dorthin und starte dann den Check.</p>
+  <main class="container tester-shell">
+    <section class="tester-hero" id="check-panel" data-token="{{.Mailbox.Token}}">
+      <div class="test-panel">
+        <p class="eyebrow">Kostenloser Deliverability Check</p>
+        <h1>Teste den Spam-Score deiner E-Mail</h1>
+        <p class="lead">Sende deine Kampagne an diese Adresse und starte danach die Auswertung.</p>
 
-      <p class="big-code"><code id="mail-address">{{.Mailbox.Address}}</code></p>
+        <div class="address-box">
+          <span class="address-label">Testadresse</span>
+          <code id="mail-address">{{.Mailbox.Address}}</code>
+          <button class="icon-btn copy-btn" type="button" onclick="copyAddress()" title="Adresse kopieren" aria-label="Adresse kopieren">Copy</button>
+        </div>
 
-      <div class="actions">
-        <button class="btn" type="button" onclick="copyAddress()">Adresse kopieren</button>
-        <button id="check-btn" class="btn btn-check" type="button">Check</button>
-        <a class="btn muted" href="/">Neue Adresse</a>
+        <div class="primary-actions">
+          <button id="check-btn" class="btn primary" type="button">Dann Score pruefen</button>
+          <a class="btn secondary" href="/">Neue Testadresse</a>
+        </div>
+
+        <div id="check-loader" class="scan-loader d-none" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <p id="check-status" class="check-status">Bereit fuer den ersten Check.</p>
       </div>
 
-      <div id="check-loader" class="scan-loader d-none" aria-hidden="true">
-        <span></span><span></span><span></span>
-      </div>
-      <p id="check-status" class="check-status">Noch kein Check gestartet.</p>
-
-      <div class="meta-grid mt-3">
-        <p class="hint">Gueltig bis: {{.Mailbox.ExpiresAt.Format "2006-01-02 15:04:05 MST"}}</p>
-        <p class="hint">Direktlink: <a href="{{.PublicURL}}/mailbox/{{.Mailbox.Token}}">{{.PublicURL}}/mailbox/{{.Mailbox.Token}}</a></p>
-      </div>
+      <aside class="side-panel">
+        <div class="step-list" aria-label="Testablauf">
+          <div class="step active">
+            <span>1</span>
+            <div>
+              <strong>Mail senden</strong>
+              <p>An die Testadresse oben.</p>
+            </div>
+          </div>
+          <div class="step">
+            <span>2</span>
+            <div>
+              <strong>Score pruefen</strong>
+              <p>MailProbe wartet live auf den Eingang.</p>
+            </div>
+          </div>
+          <div class="step">
+            <span>3</span>
+            <div>
+              <strong>Report oeffnen</strong>
+              <p>SPF, DKIM, DMARC, Inhalt und Links.</p>
+            </div>
+          </div>
+        </div>
+        <dl class="meta-list">
+          <div>
+            <dt>Gueltig bis</dt>
+            <dd>{{.Mailbox.ExpiresAt.Format "2006-01-02 15:04:05 MST"}}</dd>
+          </div>
+          <div>
+            <dt>Direktlink</dt>
+            <dd><a href="{{.PublicURL}}/mailbox/{{.Mailbox.Token}}">{{.PublicURL}}/mailbox/{{.Mailbox.Token}}</a></dd>
+          </div>
+        </dl>
+      </aside>
     </section>
 
-    <section class="card" id="ablauf">
-      <h2>Ablauf</h2>
-      <p class="hint" style="margin-bottom:12px;">Schneller Workflow wie bei einem klassischen Deliverability-Test: Adresse holen, Mail senden, Ergebnis analysieren.</p>
-      <div class="steps">
-        <article class="step"><span>1</span><p>E-Mail an die Testadresse senden</p></article>
-        <article class="step"><span>2</span><p>Auf <strong>Check</strong> klicken</p></article>
-        <article class="step"><span>3</span><p>Warten bis eine Mail eingegangen ist</p></article>
-        <article class="step"><span>4</span><p>Automatisch zum Report wechseln</p></article>
-      </div>
-      <p class="vibe-note">Built as a pragmatic vibe-coded tool: fast iteration, clear outputs, low ops overhead.</p>
+    <section class="check-grid" aria-label="Pruefbereiche">
+      <article>
+        <strong>Authentifizierung</strong>
+        <p>SPF, DKIM, DMARC und Alignment.</p>
+      </article>
+      <article>
+        <strong>Server-Signale</strong>
+        <p>PTR, HELO, Received-Kette und optional RBL.</p>
+      </article>
+      <article>
+        <strong>Content</strong>
+        <p>MIME, HTML/Text, Links und Spam-Indikatoren.</p>
+      </article>
+      <article>
+        <strong>Export</strong>
+        <p>Raw, Header und JSON fuer Workflows.</p>
+      </article>
     </section>
   </main>
 
