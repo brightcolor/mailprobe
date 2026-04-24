@@ -169,8 +169,13 @@ func writeLine(w io.Writer, line string) {
 
 func extractSMTPPath(s string) string {
 	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "<")
-	s = strings.TrimSuffix(s, ">")
+	if strings.HasPrefix(s, "<") {
+		if end := strings.Index(s, ">"); end > 0 {
+			s = s[1:end]
+		} else {
+			s = strings.TrimPrefix(s, "<")
+		}
+	}
 	if i := strings.Index(s, " "); i > 0 {
 		s = s[:i]
 	}

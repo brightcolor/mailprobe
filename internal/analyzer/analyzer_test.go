@@ -45,7 +45,7 @@ func TestHeaderValues(t *testing.T) {
 
 func TestNewsletterHeuristicsListUnsubscribe(t *testing.T) {
 	headers := mail.Header{}
-	headers.Set("Precedence", "bulk")
+	headers["Precedence"] = []string{"bulk"}
 	body := parsedBody{AllText: "hello subscribers"}
 
 	checks := newsletterHeuristics(headers, body)
@@ -56,7 +56,7 @@ func TestNewsletterHeuristicsListUnsubscribe(t *testing.T) {
 		t.Fatalf("expected list_unsub warn, got id=%s status=%s", checks[0].ID, checks[0].Status)
 	}
 
-	headers.Set("List-Unsubscribe", "<mailto:unsubscribe@example.org>")
+	headers["List-Unsubscribe"] = []string{"<mailto:unsubscribe@example.org>"}
 	checks = newsletterHeuristics(headers, body)
 	if len(checks) == 0 {
 		t.Fatal("expected newsletter checks with list-unsubscribe")
