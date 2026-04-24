@@ -1,4 +1,4 @@
-﻿{{define "home"}}
+{{define "home"}}
 <!doctype html>
 <html lang="de">
 <head>
@@ -8,25 +8,41 @@
   <link rel="stylesheet" href="/static/app.css" />
 </head>
 <body>
-  <header class="topbar"><a class="brand" href="/">{{.AppName}}</a></header>
+  <header class="topbar">
+    <a class="brand" href="/">{{.AppName}}</a>
+    <span class="topbar-note">Self-hosted deliverability lab</span>
+  </header>
+
   <main class="container">
-    <section class="card hero">
-      <h1>Prüfe Zustellbarkeit und Spam-Signale deiner E-Mail</h1>
-      <p>Erzeuge eine temporäre Testadresse, sende deine Kampagne dorthin und erhalte einen transparenten Report mit Score, Einzelchecks und Verbesserungen.</p>
-      <form method="post" action="/api/mailboxes">
-        <button class="btn" type="submit">Neue Testadresse erzeugen</button>
-      </form>
+    <section class="card hero hero-grid">
+      <div>
+        <span class="eyebrow">Deliverability and spam diagnostics</span>
+        <h1>Teste deine Mail wie ein Inbox-Filter sie sieht</h1>
+        <p>Erzeuge eine temporaere Testadresse, sende deine Kampagne und erhalte einen klaren Report mit Score, Einzelchecks und konkreten Fix-Empfehlungen.</p>
+        <form method="post" action="/api/mailboxes" class="actions">
+          <button class="btn" type="submit">Neue Testadresse erzeugen</button>
+          <a class="btn muted" href="#ablauf">So funktioniert es</a>
+        </form>
+      </div>
+      <aside class="hero-panel">
+        <h2>Quick Facts</h2>
+        <ul class="feature-list">
+          <li>SMTP Empfang fuer zufaellige Testadressen</li>
+          <li>SPF, DKIM, DMARC, MIME, URL und Header Checks</li>
+          <li>Transparente Punkte statt Blackbox</li>
+        </ul>
+        <p class="hint">Testdomain: <code>{{.Domain}}</code></p>
+      </aside>
     </section>
 
-    <section class="card">
+    <section class="card" id="ablauf">
       <h2>So funktioniert es</h2>
-      <ol>
-        <li>Testadresse erzeugen</li>
-        <li>E-Mail an die Adresse senden</li>
-        <li>Mailbox-Seite aktualisiert automatisch</li>
-        <li>Detailreport mit Prüfungen abrufen</li>
-      </ol>
-      <p class="hint">Domain für SMTP-Empfang: <code>{{.Domain}}</code></p>
+      <div class="steps">
+        <article class="step"><span>1</span><p>Testadresse erzeugen</p></article>
+        <article class="step"><span>2</span><p>E-Mail an die Adresse senden</p></article>
+        <article class="step"><span>3</span><p>Mailbox wird automatisch aktualisiert</p></article>
+        <article class="step"><span>4</span><p>Detailreport mit Checks oeffnen</p></article>
+      </div>
     </section>
   </main>
 </body>

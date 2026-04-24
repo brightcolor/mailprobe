@@ -1,4 +1,4 @@
-﻿{{define "report"}}
+{{define "report"}}
 <!doctype html>
 <html lang="de">
 <head>
@@ -8,44 +8,58 @@
   <link rel="stylesheet" href="/static/app.css" />
 </head>
 <body>
-<header class="topbar"><a class="brand" href="/">{{.AppName}}</a></header>
+<header class="topbar">
+  <a class="brand" href="/">{{.AppName}}</a>
+  <span class="topbar-note">Analysis report</span>
+</header>
+
 <main class="container">
   <section class="card score-card">
-    <h1>Deliverability Score</h1>
-    <div class="score">{{printf "%.1f" .Report.Score}}<span>/10</span></div>
-    <p class="score-label">{{.Report.ScoreLabel}}</p>
-    <div class="badges">
-      <span class="badge pass">Pass: {{index .Statuses "pass"}}</span>
-      <span class="badge warn">Warn: {{index .Statuses "warn"}}</span>
-      <span class="badge fail">Fail: {{index .Statuses "fail"}}</span>
-      <span class="badge info">Info: {{index .Statuses "info"}}</span>
+    <div class="score-layout">
+      <div class="score-ring" style="--score: {{printf "%.1f" .Report.Score}};">
+        <div class="score-ring-inner">
+          <div class="score">{{printf "%.1f" .Report.Score}}<span>/10</span></div>
+          <p class="score-label">{{.Report.ScoreLabel}}</p>
+        </div>
+      </div>
+      <div>
+        <h1>Deliverability Score</h1>
+        <div class="badges">
+          <span class="badge pass">Pass: {{index .Statuses "pass"}}</span>
+          <span class="badge warn">Warn: {{index .Statuses "warn"}}</span>
+          <span class="badge fail">Fail: {{index .Statuses "fail"}}</span>
+          <span class="badge info">Info: {{index .Statuses "info"}}</span>
+        </div>
+        <p class="hint">Mailbox: <a href="/mailbox/{{.Mailbox.Token}}">{{.Mailbox.Address}}</a></p>
+      </div>
     </div>
-    <p class="hint">Mailbox: <a href="/mailbox/{{.Mailbox.Token}}">{{.Mailbox.Address}}</a></p>
   </section>
 
   <section class="card">
-    <h2>Einzelprüfungen</h2>
-    <table>
-      <thead>
-      <tr><th>Status</th><th>Check</th><th>Bewertung</th><th>Details</th><th>Empfehlung</th></tr>
-      </thead>
-      <tbody>
-      {{range .Report.Checks}}
-      <tr>
-        <td><span class="pill {{.Status}}">{{.Status}}</span></td>
-        <td>{{.Name}}</td>
-        <td>{{printf "%+.1f" .ScoreDelta}}</td>
-        <td>{{.Summary}}</td>
-        <td>{{.Suggestion}}</td>
-      </tr>
-      {{end}}
-      </tbody>
-    </table>
+    <h2>Einzelpruefungen</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+        <tr><th>Status</th><th>Check</th><th>Bewertung</th><th>Details</th><th>Empfehlung</th></tr>
+        </thead>
+        <tbody>
+        {{range .Report.Checks}}
+        <tr>
+          <td><span class="pill {{.Status}}">{{.Status}}</span></td>
+          <td>{{.Name}}</td>
+          <td>{{printf "%+.1f" .ScoreDelta}}</td>
+          <td>{{.Summary}}</td>
+          <td>{{.Suggestion}}</td>
+        </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
   </section>
 
   {{if .Report.Suggestions}}
   <section class="card">
-    <h2>Verbesserungsvorschläge</h2>
+    <h2>Verbesserungsvorschlaege</h2>
     <ul>
       {{range .Report.Suggestions}}<li>{{.}}</li>{{end}}
     </ul>
