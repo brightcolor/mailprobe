@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,7 +14,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -32,9 +32,13 @@ type Server struct {
 	staticFS http.Handler
 }
 
+var errActiveMailboxLimit = errors.New("active mailbox limit reached for ip")
+
 type HomeData struct {
-	AppName string
-	Domain  string
+	AppName   string
+	Domain    string
+	Mailbox   model.Mailbox
+	PublicURL string
 }
 
 type MailboxData struct {
@@ -57,7 +61,9 @@ func New(cfg config.Config, st *store.Store, logger *log.Logger) (*Server, error
 	if logger == nil {
 		logger = log.Default()
 	}
-	t, err := template.ParseGlob(filepath.Join("internal", "web", "templates", "*.html"))
+	t, err := template.New("").Funcs(template.FuncMap{
+		"msgref": messageReference,
+	}).ParseGlob(filepath.Join("internal", "web", "templates", "*.html"))
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +133,42 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	data := HomeData{AppName: s.cfg.AppName, Domain: s.cfg.SMTPDomain}
+	ip := s.clientIP(r)
+	forceNew := r.URL.Query().Get("new") == "1"
+
+	var preferredToken string
+	if c, err := r.Cookie("mailprobe_mailbox"); err == nil {
+		preferredToken = strings.TrimSpace(c.Value)
+	}
+
+	mb, err := s.getOrCreateHomeMailbox(r.Context(), ip, preferredToken, forceNew)
+	if err != nil {
+		if errors.Is(err, errActiveMailboxLimit) {
+			http.Error(w, "too many active mailboxes for this IP", http.StatusTooManyRequests)
+			return
+		}
+		http.Error(w, "could not prepare mailbox", http.StatusInternalServerError)
+		return
+	}
+	maxAge := int(time.Until(mb.ExpiresAt).Seconds())
+	if maxAge < 0 {
+		maxAge = 0
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "mailprobe_mailbox",
+		Value:    mb.Token,
+		Path:     "/",
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	data := HomeData{
+		AppName:   s.cfg.AppName,
+		Domain:    s.cfg.SMTPDomain,
+		Mailbox:   mb,
+		PublicURL: s.cfg.PublicBaseURL,
+	}
 	s.render(w, "home", data)
 }
 
@@ -168,8 +209,20 @@ func (s *Server) createMailbox(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	maxAge := int(time.Until(mb.ExpiresAt).Seconds())
+	if maxAge < 0 {
+		maxAge = 0
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "mailprobe_mailbox",
+		Value:    mb.Token,
+		Path:     "/",
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
 
-	http.Redirect(w, r, "/mailbox/"+mb.Token, http.StatusSeeOther)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (s *Server) mailboxPage(w http.ResponseWriter, r *http.Request) {
@@ -232,10 +285,10 @@ func (s *Server) reportPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var selected *model.MessageWithReport
-	messageIDQuery := strings.TrimSpace(r.URL.Query().Get("message"))
-	if messageIDQuery != "" {
+	msgRefQuery := strings.TrimSpace(r.URL.Query().Get("msg"))
+	if msgRefQuery != "" {
 		for i := range msgs {
-			if fmt.Sprintf("%d", msgs[i].Message.ID) == messageIDQuery {
+			if messageReference(token, msgs[i].Message.ID) == msgRefQuery {
 				selected = &msgs[i]
 				break
 			}
@@ -275,22 +328,43 @@ func (s *Server) rawPage(w http.ResponseWriter, r *http.Request) {
 	}
 	rest := strings.TrimPrefix(r.URL.Path, "/raw/")
 	parts := strings.Split(rest, "/")
-	if len(parts) != 2 {
+	if len(parts) != 3 {
 		http.NotFound(w, r)
 		return
 	}
-	id, err := strconv.ParseInt(parts[0], 10, 64)
+	token := strings.TrimSpace(parts[0])
+	msgRef := strings.TrimSpace(parts[1])
+	part := strings.TrimSpace(parts[2])
+	if token == "" || msgRef == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	mb, err := s.store.GetMailboxByToken(r.Context(), token)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	msg, err := s.store.GetMessage(r.Context(), id)
+
+	msgs, err := s.store.ListMessagesByMailbox(r.Context(), mb.ID, 500)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
+	var msg *model.Message
+	for i := range msgs {
+		if messageReference(token, msgs[i].ID) == msgRef {
+			msg = &msgs[i]
+			break
+		}
+	}
+	if msg == nil {
+		http.NotFound(w, r)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	switch parts[1] {
+	switch part {
 	case "headers":
 		_, _ = w.Write([]byte(msg.HeaderBlock))
 	case "source":
@@ -327,7 +401,7 @@ func (s *Server) mailboxAPI(w http.ResponseWriter, r *http.Request) {
 			resp["latest_message_id"] = msgs[0].Message.ID
 			resp["latest_received_at"] = msgs[0].Message.ReceivedAt
 			if msgs[0].Report != nil {
-				resp["latest_report_path"] = fmt.Sprintf("/report/%s?message=%d", mb.Token, msgs[0].Message.ID)
+				resp["latest_report_path"] = fmt.Sprintf("/report/%s?msg=%s", mb.Token, messageReference(mb.Token, msgs[0].Message.ID))
 				resp["latest_score"] = msgs[0].Report.Score
 			}
 		}
@@ -415,4 +489,33 @@ func sortChecks(checks []model.CheckResult) {
 		}
 		return ri < rj
 	})
+}
+
+func messageReference(mailboxToken string, messageID int64) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d", mailboxToken, messageID)))
+	return hex.EncodeToString(sum[:8])
+}
+
+func (s *Server) getOrCreateHomeMailbox(ctx context.Context, ip, preferredToken string, forceNew bool) (model.Mailbox, error) {
+	if !forceNew && preferredToken != "" {
+		mb, err := s.store.GetMailboxByToken(ctx, preferredToken)
+		if err == nil && time.Now().UTC().Before(mb.ExpiresAt) {
+			_ = s.store.TouchMailbox(ctx, mb.ID)
+			return mb, nil
+		}
+	}
+
+	active, err := s.store.CountActiveMailboxesByIP(ctx, ip)
+	if err != nil {
+		return model.Mailbox{}, err
+	}
+	if active >= s.cfg.MaxActivePerIP {
+		return model.Mailbox{}, errActiveMailboxLimit
+	}
+
+	token, addr, err := s.generateMailboxAddress(ctx)
+	if err != nil {
+		return model.Mailbox{}, err
+	}
+	return s.store.CreateMailbox(ctx, token, addr, ip, s.cfg.MailboxTTL)
 }

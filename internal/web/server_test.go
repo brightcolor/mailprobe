@@ -29,7 +29,8 @@ func TestReportUsesTokenURLAndInlineRawAccordion(t *testing.T) {
 	srv, st, mb, msg, rep := prepareWebTestFixture(t)
 	h := srv.Handler()
 
-	req := httptest.NewRequest(http.MethodGet, "/report/"+mb.Token+"?message="+itoa(msg.ID), nil)
+	msgRef := messageReference(mb.Token, msg.ID)
+	req := httptest.NewRequest(http.MethodGet, "/report/"+mb.Token+"?msg="+msgRef, nil)
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 
@@ -45,6 +46,13 @@ func TestReportUsesTokenURLAndInlineRawAccordion(t *testing.T) {
 	}
 	if !strings.Contains(body, msg.RawSource) {
 		t.Fatalf("expected raw source in report page")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/raw/"+mb.Token+"/"+msgRef+"/headers", nil)
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Subject: Demo") {
+		t.Fatalf("expected tokenized raw header download, code=%d body=%q", rr.Code, rr.Body.String())
 	}
 
 	// Numeric report IDs should no longer be directly routable.
@@ -78,7 +86,7 @@ func TestMailboxStatusReturnsTokenizedReportPath(t *testing.T) {
 		t.Fatalf("invalid json payload: %v", err)
 	}
 	got, _ := payload["latest_report_path"].(string)
-	want := "/report/" + mb.Token + "?message=" + itoa(msg.ID)
+	want := "/report/" + mb.Token + "?msg=" + messageReference(mb.Token, msg.ID)
 	if got != want {
 		t.Fatalf("latest_report_path mismatch: got %q want %q", got, want)
 	}

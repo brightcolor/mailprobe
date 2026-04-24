@@ -130,6 +130,7 @@ func processInbound(ctx context.Context, st *store.Store, engine *analyzer.Engin
 	}
 
 	raw := string(rm.Data)
+	raw = enrichWithReceiverAuthHeaders(ctx, cfg, rm, raw)
 	headers := headerBlock(raw)
 	subject := headerField(headers, "Subject")
 

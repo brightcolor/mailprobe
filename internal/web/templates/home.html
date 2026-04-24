@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>{{.AppName}} - E-Mail Deliverability Check</title>
+  <title>{{.AppName}} - Mail Deliverability Test</title>
   <link rel="stylesheet" href="/static/vendor/bootstrap.min.css" />
   <link rel="stylesheet" href="/static/app.css" />
 </head>
@@ -12,44 +12,47 @@
   <header class="topbar navbar navbar-expand-lg">
     <div class="container-fluid px-0">
       <a class="brand navbar-brand" href="/">{{.AppName}}</a>
-      <span class="topbar-note ms-auto">Self-hosted deliverability lab</span>
+      <span class="topbar-note ms-auto">E-Mail Testing</span>
     </div>
   </header>
 
   <main class="container">
-    <section class="card hero hero-grid">
-      <div>
-        <span class="eyebrow">Deliverability and spam diagnostics</span>
-        <h1>Teste deine Mail wie ein Inbox-Filter sie sieht</h1>
-        <p>Erzeuge eine temporaere Testadresse, sende deine Kampagne und erhalte einen klaren Report mit Score, Einzelchecks und konkreten Fix-Empfehlungen.</p>
-        <form method="post" action="/api/mailboxes" class="actions">
-          <button class="btn" type="submit">Neue Testadresse erzeugen</button>
-          <a class="btn muted" href="#ablauf">So funktioniert es</a>
-        </form>
+    <section class="card tester-card" id="check-panel" data-token="{{.Mailbox.Token}}">
+      <h1>Teste deinen E-Mail Score</h1>
+      <p class="hint">Sende deine E-Mail an die folgende Adresse und klicke danach auf <strong>Check</strong>.</p>
+
+      <p class="big-code"><code id="mail-address">{{.Mailbox.Address}}</code></p>
+
+      <div class="actions">
+        <button class="btn" type="button" onclick="copyAddress()">Adresse kopieren</button>
+        <button id="check-btn" class="btn btn-check" type="button">Check</button>
+        <a class="btn muted" href="/?new=1">Neue Adresse</a>
       </div>
-      <aside class="hero-panel">
-        <h2>Quick Facts</h2>
-        <ul class="feature-list">
-          <li>SMTP Empfang fuer zufaellige Testadressen</li>
-          <li>SPF, DKIM, DMARC, MIME, URL und Header Checks</li>
-          <li>Transparente Punkte statt Blackbox</li>
-        </ul>
-        <p class="hint">Testdomain: <code>{{.Domain}}</code></p>
-      </aside>
+
+      <div id="check-loader" class="scan-loader d-none" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+      <p id="check-status" class="check-status">Noch kein Check gestartet.</p>
+
+      <div class="meta-grid mt-3">
+        <p class="hint">Gueltig bis: {{.Mailbox.ExpiresAt.Format "2006-01-02 15:04:05 MST"}}</p>
+        <p class="hint">Direktlink: <a href="{{.PublicURL}}/mailbox/{{.Mailbox.Token}}">{{.PublicURL}}/mailbox/{{.Mailbox.Token}}</a></p>
+      </div>
     </section>
 
     <section class="card" id="ablauf">
-      <h2>So funktioniert es</h2>
+      <h2>Ablauf</h2>
       <div class="steps">
-        <article class="step"><span>1</span><p>Testadresse erzeugen</p></article>
-        <article class="step"><span>2</span><p>E-Mail an die Adresse senden</p></article>
-        <article class="step"><span>3</span><p>Mailbox wird automatisch aktualisiert</p></article>
-        <article class="step"><span>4</span><p>Detailreport mit Checks oeffnen</p></article>
+        <article class="step"><span>1</span><p>E-Mail an die Testadresse senden</p></article>
+        <article class="step"><span>2</span><p>Auf <strong>Check</strong> klicken</p></article>
+        <article class="step"><span>3</span><p>Warten bis eine Mail eingegangen ist</p></article>
+        <article class="step"><span>4</span><p>Automatisch zum Report wechseln</p></article>
       </div>
     </section>
   </main>
 
   <script src="/static/vendor/bootstrap.bundle.min.js"></script>
+  <script src="/static/app.js"></script>
 </body>
 </html>
 {{end}}
