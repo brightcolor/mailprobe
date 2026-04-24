@@ -1,0 +1,68 @@
+package config
+
+import (
+	"testing"
+	"time"
+)
+
+func TestLoadParsesConfiguredValues(t *testing.T) {
+	t.Setenv("APP_NAME", "ProbeX")
+	t.Setenv("HTTP_LISTEN_ADDR", ":18080")
+	t.Setenv("SMTP_LISTEN_ADDR", ":12525")
+	t.Setenv("PUBLIC_BASE_URL", "https://example.test/")
+	t.Setenv("SMTP_DOMAIN", "Mail.Example.Test")
+	t.Setenv("DB_PATH", "/tmp/test.db")
+	t.Setenv("DATA_DIR", "/tmp/data")
+	t.Setenv("MAILBOX_TTL", "2h")
+	t.Setenv("DATA_RETENTION_TTL", "48h")
+	t.Setenv("CLEANUP_INTERVAL", "15m")
+	t.Setenv("MAX_MESSAGE_BYTES", "1048576")
+	t.Setenv("MAX_ACTIVE_MAILBOXES_PER_IP", "12")
+	t.Setenv("WEB_RATE_LIMIT_PER_MIN", "90")
+	t.Setenv("SMTP_RATE_LIMIT_PER_HOUR", "220")
+	t.Setenv("ENABLE_RBL_CHECKS", "true")
+	t.Setenv("RBL_PROVIDERS", "zen.spamhaus.org, bl.spamcop.net")
+	t.Setenv("ENABLE_SPAMASSASSIN", "true")
+	t.Setenv("SPAMASSASSIN_HOSTPORT", "spamd:783")
+	t.Setenv("ENABLE_RSPAMD", "true")
+	t.Setenv("RSPAMD_URL", "http://rspamd:11334/checkv2")
+	t.Setenv("RSPAMD_PASSWORD", "secret")
+	t.Setenv("TRUSTED_PROXY_CIDRS", "10.0.0.0/8, 127.0.0.1/32")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.AppName != "ProbeX" || cfg.PublicBaseURL != "https://example.test" {
+		t.Fatalf("unexpected basic config values: %+v", cfg)
+	}
+	if cfg.SMTPDomain != "mail.example.test" {
+		t.Fatalf("expected lowercased smtp domain, got %q", cfg.SMTPDomain)
+	}
+	if cfg.MailboxTTL != 2*time.Hour || cfg.RetentionTTL != 48*time.Hour || cfg.CleanupInterval != 15*time.Minute {
+		t.Fatalf("unexpected duration values: mailbox=%s retention=%s cleanup=%s", cfg.MailboxTTL, cfg.RetentionTTL, cfg.CleanupInterval)
+	}
+	if !cfg.EnableRBLChecks || !cfg.EnableSpamAssassin || !cfg.EnableRspamd {
+		t.Fatalf("expected optional checks to be enabled: %+v", cfg)
+	}
+	if len(cfg.RBLProviders) != 2 || len(cfg.TrustedProxyCIDRs) != 2 {
+		t.Fatalf("unexpected csv parsing: rbl=%v proxy=%v", cfg.RBLProviders, cfg.TrustedProxyCIDRs)
+	}
+}
+
+func TestLoadRejectsInvalidLimits(t *testing.T) {
+	t.Setenv("SMTP_DOMAIN", "example.test")
+	t.Setenv("MAX_MESSAGE_BYTES", "1024")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for too low MAX_MESSAGE_BYTES")
+	}
+}
+
+func TestSplitCSV(t *testing.T) {
+	got := splitCSV(" a, ,b ,, c ")
+	if len(got) != 3 || got[0] != "a" || got[1] != "b" || got[2] != "c" {
+		t.Fatalf("unexpected splitCSV output: %#v", got)
+	}
+}
