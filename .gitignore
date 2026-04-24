@@ -12,6 +12,9 @@
 
 # Go build cache
 coverage.out
+.gocache/
+.gopath/
+*.log
 
 # Editors
 .vscode/
