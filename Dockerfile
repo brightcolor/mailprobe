@@ -7,7 +7,7 @@ COPY go.mod ./
 RUN go mod download
 COPY . .
 RUN go mod tidy
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/mailprobe ./cmd/mailprobe
+RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /out/mailprobe ./cmd/mailprobe
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates tzdata sqlite-libs
