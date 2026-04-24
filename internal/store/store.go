@@ -1,4 +1,4 @@
-﻿package store
+package store
 
 import (
 	"context"
@@ -46,6 +46,17 @@ func (s *Store) CountActiveMailboxesByIP(ctx context.Context, ip string) (int, e
 	row := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(1) FROM mailboxes WHERE created_ip = ? AND expires_at > ?
 	`, ip, time.Now().UTC())
+	var c int
+	if err := row.Scan(&c); err != nil {
+		return 0, err
+	}
+	return c, nil
+}
+
+func (s *Store) CountActiveMailboxes(ctx context.Context) (int, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(1) FROM mailboxes WHERE expires_at > ?
+	`, time.Now().UTC())
 	var c int
 	if err := row.Scan(&c); err != nil {
 		return 0, err

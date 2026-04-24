@@ -40,6 +40,13 @@ func TestStoreMailboxMessageReportLifecycle(t *testing.T) {
 	if active != 1 {
 		t.Fatalf("expected 1 active mailbox, got %d", active)
 	}
+	activeGlobal, err := st.CountActiveMailboxes(ctx)
+	if err != nil {
+		t.Fatalf("CountActiveMailboxes: %v", err)
+	}
+	if activeGlobal != 1 {
+		t.Fatalf("expected 1 active mailbox globally, got %d", activeGlobal)
+	}
 
 	msg1, err := st.SaveMessage(ctx, model.Message{
 		MailboxID:   mb.ID,

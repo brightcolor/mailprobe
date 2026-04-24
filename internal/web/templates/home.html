@@ -12,21 +12,21 @@
   <header class="topbar navbar navbar-expand-lg">
     <div class="container-fluid px-0">
       <a class="brand navbar-brand" href="/">{{.AppName}}</a>
-      <span class="topbar-note ms-auto">E-Mail Testing</span>
+      <span class="topbar-note ms-auto">E-Mail Testing • vibe-coded</span>
     </div>
   </header>
 
-  <main class="container">
+<main class="container">
     <section class="card tester-card" id="check-panel" data-token="{{.Mailbox.Token}}">
       <h1>Teste deinen E-Mail Score</h1>
-      <p class="hint">Sende deine E-Mail an die folgende Adresse und klicke danach auf <strong>Check</strong>.</p>
+      <p class="hint">Jeder Seitenaufruf erzeugt automatisch eine neue Testadresse. Sende deine E-Mail dorthin und starte dann den Check.</p>
 
       <p class="big-code"><code id="mail-address">{{.Mailbox.Address}}</code></p>
 
       <div class="actions">
         <button class="btn" type="button" onclick="copyAddress()">Adresse kopieren</button>
         <button id="check-btn" class="btn btn-check" type="button">Check</button>
-        <a class="btn muted" href="/?new=1">Neue Adresse</a>
+        <a class="btn muted" href="/">Neue Adresse</a>
       </div>
 
       <div id="check-loader" class="scan-loader d-none" aria-hidden="true">
@@ -42,12 +42,14 @@
 
     <section class="card" id="ablauf">
       <h2>Ablauf</h2>
+      <p class="hint" style="margin-bottom:12px;">Schneller Workflow wie bei einem klassischen Deliverability-Test: Adresse holen, Mail senden, Ergebnis analysieren.</p>
       <div class="steps">
         <article class="step"><span>1</span><p>E-Mail an die Testadresse senden</p></article>
         <article class="step"><span>2</span><p>Auf <strong>Check</strong> klicken</p></article>
         <article class="step"><span>3</span><p>Warten bis eine Mail eingegangen ist</p></article>
         <article class="step"><span>4</span><p>Automatisch zum Report wechseln</p></article>
       </div>
+      <p class="vibe-note">Built as a pragmatic vibe-coded tool: fast iteration, clear outputs, low ops overhead.</p>
     </section>
   </main>
 

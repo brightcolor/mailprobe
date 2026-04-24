@@ -18,8 +18,11 @@ func TestLoadParsesConfiguredValues(t *testing.T) {
 	t.Setenv("CLEANUP_INTERVAL", "15m")
 	t.Setenv("MAX_MESSAGE_BYTES", "1048576")
 	t.Setenv("MAX_ACTIVE_MAILBOXES_PER_IP", "12")
+	t.Setenv("MAX_ACTIVE_MAILBOXES_GLOBAL", "1200")
 	t.Setenv("WEB_RATE_LIMIT_PER_MIN", "90")
+	t.Setenv("WEB_BURST_PER_10_SEC", "30")
 	t.Setenv("SMTP_RATE_LIMIT_PER_HOUR", "220")
+	t.Setenv("SMTP_BURST_PER_MIN", "45")
 	t.Setenv("ENABLE_RBL_CHECKS", "true")
 	t.Setenv("RBL_PROVIDERS", "zen.spamhaus.org, bl.spamcop.net")
 	t.Setenv("ENABLE_SPAMASSASSIN", "true")
@@ -27,6 +30,7 @@ func TestLoadParsesConfiguredValues(t *testing.T) {
 	t.Setenv("ENABLE_RSPAMD", "true")
 	t.Setenv("RSPAMD_URL", "http://rspamd:11334/checkv2")
 	t.Setenv("RSPAMD_PASSWORD", "secret")
+	t.Setenv("ALERT_WEBHOOK_URL", "https://alerts.example.test/hook")
 	t.Setenv("TRUSTED_PROXY_CIDRS", "10.0.0.0/8, 127.0.0.1/32")
 
 	cfg, err := Load()
@@ -43,6 +47,12 @@ func TestLoadParsesConfiguredValues(t *testing.T) {
 	if cfg.MailboxTTL != 2*time.Hour || cfg.RetentionTTL != 48*time.Hour || cfg.CleanupInterval != 15*time.Minute {
 		t.Fatalf("unexpected duration values: mailbox=%s retention=%s cleanup=%s", cfg.MailboxTTL, cfg.RetentionTTL, cfg.CleanupInterval)
 	}
+	if cfg.MaxActiveGlobal != 1200 || cfg.WebBurstPer10Sec != 30 || cfg.SMTPBurstPerMin != 45 {
+		t.Fatalf("unexpected burst/global limits: %+v", cfg)
+	}
+	if cfg.AlertWebhookURL != "https://alerts.example.test/hook" {
+		t.Fatalf("expected alert webhook URL to be set, got %q", cfg.AlertWebhookURL)
+	}
 	if !cfg.EnableRBLChecks || !cfg.EnableSpamAssassin || !cfg.EnableRspamd {
 		t.Fatalf("expected optional checks to be enabled: %+v", cfg)
 	}
@@ -57,6 +67,15 @@ func TestLoadRejectsInvalidLimits(t *testing.T) {
 	_, err := Load()
 	if err == nil {
 		t.Fatal("expected error for too low MAX_MESSAGE_BYTES")
+	}
+}
+
+func TestLoadRejectsZeroBurstLimit(t *testing.T) {
+	t.Setenv("SMTP_DOMAIN", "example.test")
+	t.Setenv("WEB_BURST_PER_10_SEC", "0")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for zero WEB_BURST_PER_10_SEC")
 	}
 }
 

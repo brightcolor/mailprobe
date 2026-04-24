@@ -1,4 +1,4 @@
-﻿package smtp
+package smtp
 
 import (
 	"bufio"
@@ -30,6 +30,8 @@ type Server struct {
 	Domain          string
 	MaxMessageBytes int64
 	RateLimiter     *ratelimit.Limiter
+	BurstLimiter    *ratelimit.Limiter
+	OnRateLimited   func(remoteIP string)
 	Logger          *log.Logger
 	HandleMail      Handler
 	AllowRecipient  RecipientValidator
@@ -83,7 +85,10 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	if remoteIP == "" {
 		remoteIP = conn.RemoteAddr().String()
 	}
-	if s.RateLimiter != nil && !s.RateLimiter.Allow(remoteIP) {
+	if (s.RateLimiter != nil && !s.RateLimiter.Allow("smtp:hour:"+remoteIP)) || (s.BurstLimiter != nil && !s.BurstLimiter.Allow("smtp:burst:"+remoteIP)) {
+		if s.OnRateLimited != nil {
+			s.OnRateLimited(remoteIP)
+		}
 		writeLine(conn, "451 4.7.1 rate limit exceeded")
 		return
 	}

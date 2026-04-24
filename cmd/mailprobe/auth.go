@@ -19,17 +19,27 @@ import (
 type authResults struct {
 	SPFResult   string
 	SPFDomain   string
+	SPFDetail   string
 	DKIMResult  string
 	DKIMDomain  string
+	DKIMDetail  string
 	DMARCResult string
 	FromDomain  string
+	DMARCDetail string
 }
 
 func enrichWithReceiverAuthHeaders(ctx context.Context, cfg config.Config, rm smtp.ReceivedMail, raw string) string {
 	res := evaluateAuthResults(ctx, rm, raw)
 	authHeader := buildAuthenticationResultsHeader(cfg.SMTPDomain, res)
 	receivedSPF := buildReceivedSPFHeader(cfg.SMTPDomain, rm, res.SPFResult)
-	return prependHeaders(raw, []string{authHeader, receivedSPF})
+	detailHeaders := []string{
+		authHeader,
+		receivedSPF,
+		"X-MailProbe-SPF-Detail: " + safeAuthValue(emptyFallback(res.SPFDetail, "none")),
+		"X-MailProbe-DKIM-Detail: " + safeAuthValue(emptyFallback(res.DKIMDetail, "none")),
+		"X-MailProbe-DMARC-Detail: " + safeAuthValue(emptyFallback(res.DMARCDetail, "none")),
+	}
+	return prependHeaders(raw, detailHeaders)
 }
 
 func evaluateAuthResults(ctx context.Context, rm smtp.ReceivedMail, raw string) authResults {
@@ -40,16 +50,18 @@ func evaluateAuthResults(ctx context.Context, rm smtp.ReceivedMail, raw string) 
 	}
 
 	ip := net.ParseIP(strings.TrimSpace(rm.RemoteIP))
-	spfRes, spfDomain := evaluateSPF(ctx, ip, rm.HELO, rm.MailFrom)
+	spfRes, spfDomain, spfDetail := evaluateSPF(ctx, ip, rm.HELO, rm.MailFrom)
 	out.SPFResult = spfRes
 	out.SPFDomain = spfDomain
+	out.SPFDetail = spfDetail
 
-	dkimRes, dkimDomain := evaluateDKIM(raw)
+	dkimRes, dkimDomain, dkimDetail := evaluateDKIM(raw)
 	out.DKIMResult = dkimRes
 	out.DKIMDomain = dkimDomain
+	out.DKIMDetail = dkimDetail
 
 	out.FromDomain = fromDomain(raw)
-	out.DMARCResult = evaluateDMARC(ctx, out.FromDomain, out.SPFResult, out.SPFDomain, out.DKIMResult, out.DKIMDomain)
+	out.DMARCResult, out.DMARCDetail = evaluateDMARC(ctx, out.FromDomain, out.SPFResult, out.SPFDomain, out.DKIMResult, out.DKIMDomain)
 
 	return out
 }
@@ -145,28 +157,34 @@ func fromDomain(raw string) string {
 	return extractDomain(addr.Address)
 }
 
-func evaluateDKIM(raw string) (result, domain string) {
+func evaluateDKIM(raw string) (result, domain string, detail string) {
 	verifs, err := dkim.Verify(strings.NewReader(raw))
 	if len(verifs) == 0 {
 		if err != nil {
 			switch {
 			case dkim.IsTempFail(err):
-				return "temperror", ""
+				return "temperror", "", err.Error()
 			case dkim.IsPermFail(err):
-				return "permerror", ""
+				return "permerror", "", err.Error()
 			default:
-				return "fail", ""
+				return "fail", "", err.Error()
 			}
 		}
-		return "none", ""
+		return "none", "", "no signature"
 	}
 
+	chunks := make([]string, 0, len(verifs))
 	for _, v := range verifs {
 		if v == nil {
 			continue
 		}
 		if v.Err == nil {
-			return "pass", strings.ToLower(strings.TrimSpace(v.Domain))
+			chunks = append(chunks, fmt.Sprintf("%s=pass", emptyFallback(v.Domain, "unknown")))
+		} else {
+			chunks = append(chunks, fmt.Sprintf("%s=%s", emptyFallback(v.Domain, "unknown"), v.Err.Error()))
+		}
+		if v.Err == nil {
+			return "pass", strings.ToLower(strings.TrimSpace(v.Domain)), strings.Join(chunks, ", ")
 		}
 	}
 	for _, v := range verifs {
@@ -174,7 +192,7 @@ func evaluateDKIM(raw string) (result, domain string) {
 			continue
 		}
 		if dkim.IsTempFail(v.Err) {
-			return "temperror", strings.ToLower(strings.TrimSpace(v.Domain))
+			return "temperror", strings.ToLower(strings.TrimSpace(v.Domain)), strings.Join(chunks, ", ")
 		}
 	}
 	for _, v := range verifs {
@@ -182,20 +200,20 @@ func evaluateDKIM(raw string) (result, domain string) {
 			continue
 		}
 		if dkim.IsPermFail(v.Err) {
-			return "permerror", strings.ToLower(strings.TrimSpace(v.Domain))
+			return "permerror", strings.ToLower(strings.TrimSpace(v.Domain)), strings.Join(chunks, ", ")
 		}
 	}
 	for _, v := range verifs {
 		if v != nil {
-			return "fail", strings.ToLower(strings.TrimSpace(v.Domain))
+			return "fail", strings.ToLower(strings.TrimSpace(v.Domain)), strings.Join(chunks, ", ")
 		}
 	}
-	return "fail", ""
+	return "fail", "", strings.Join(chunks, ", ")
 }
 
-func evaluateDMARC(ctx context.Context, fromDomain, spfResult, spfDomain, dkimResult, dkimDomain string) string {
+func evaluateDMARC(ctx context.Context, fromDomain, spfResult, spfDomain, dkimResult, dkimDomain string) (string, string) {
 	if strings.TrimSpace(fromDomain) == "" {
-		return "none"
+		return "none", "missing from domain"
 	}
 	rec, err := dmarc.LookupWithOptions(fromDomain, &dmarc.LookupOptions{
 		LookupTXT: func(domain string) ([]string, error) {
@@ -205,11 +223,11 @@ func evaluateDMARC(ctx context.Context, fromDomain, spfResult, spfDomain, dkimRe
 	if err != nil {
 		switch {
 		case err == dmarc.ErrNoPolicy:
-			return "none"
+			return "none", "no policy"
 		case dmarc.IsTempFail(err):
-			return "temperror"
+			return "temperror", err.Error()
 		default:
-			return "permerror"
+			return "permerror", err.Error()
 		}
 	}
 
@@ -221,10 +239,11 @@ func evaluateDMARC(ctx context.Context, fromDomain, spfResult, spfDomain, dkimRe
 	if dkimResult == "pass" {
 		dkimAligned = domainAligned(dkimDomain, fromDomain, rec.DKIMAlignment == dmarc.AlignmentStrict)
 	}
+	detail := fmt.Sprintf("policy=%s spf_aligned=%t dkim_aligned=%t adkim=%s aspf=%s", rec.Policy, spfAligned, dkimAligned, rec.DKIMAlignment, rec.SPFAlignment)
 	if spfAligned || dkimAligned {
-		return "pass"
+		return "pass", detail
 	}
-	return "fail"
+	return "fail", detail
 }
 
 func domainAligned(authDomain, fromDomain string, strict bool) bool {
@@ -239,46 +258,48 @@ func domainAligned(authDomain, fromDomain string, strict bool) bool {
 	return authDomain == fromDomain || strings.HasSuffix(authDomain, "."+fromDomain) || strings.HasSuffix(fromDomain, "."+authDomain)
 }
 
-func evaluateSPF(ctx context.Context, remoteIP net.IP, helo, envelopeFrom string) (result, domain string) {
+func evaluateSPF(ctx context.Context, remoteIP net.IP, helo, envelopeFrom string) (result, domain string, detail string) {
 	domain = extractDomain(envelopeFrom)
 	if domain == "" {
 		domain = strings.ToLower(strings.TrimSpace(helo))
 	}
 	if domain == "" || remoteIP == nil {
-		return "none", domain
+		return "none", domain, "missing sender domain or remote ip"
 	}
 	seen := make(map[string]struct{})
-	return checkSPFDomain(ctx, remoteIP, domain, 0, seen), domain
+	res, matchedBy := checkSPFDomain(ctx, remoteIP, domain, 0, seen)
+	detail = fmt.Sprintf("domain=%s mechanism=%s", domain, emptyFallback(matchedBy, "none"))
+	return res, domain, detail
 }
 
-func checkSPFDomain(ctx context.Context, remoteIP net.IP, domain string, depth int, seen map[string]struct{}) string {
+func checkSPFDomain(ctx context.Context, remoteIP net.IP, domain string, depth int, seen map[string]struct{}) (string, string) {
 	if depth > 10 {
-		return "permerror"
+		return "permerror", "depth-limit"
 	}
 	domain = strings.ToLower(strings.TrimSpace(domain))
 	if domain == "" {
-		return "none"
+		return "none", "empty-domain"
 	}
 	if _, ok := seen[domain]; ok {
-		return "permerror"
+		return "permerror", "loop-detected"
 	}
 	seen[domain] = struct{}{}
 	defer delete(seen, domain)
 
 	record, recErr := lookupSPFRecord(ctx, domain)
 	if recErr == "none" {
-		return "none"
+		return "none", "no-record"
 	}
 	if recErr == "temperror" {
-		return "temperror"
+		return "temperror", "dns-temporary-error"
 	}
 	if recErr == "permerror" {
-		return "permerror"
+		return "permerror", "multiple-records"
 	}
 
 	tokens := strings.Fields(record)
 	if len(tokens) == 0 {
-		return "none"
+		return "none", "empty-record"
 	}
 
 	redirect := ""
@@ -289,6 +310,9 @@ func checkSPFDomain(ctx context.Context, remoteIP net.IP, domain string, depth i
 		}
 		if strings.HasPrefix(strings.ToLower(tok), "redirect=") {
 			redirect = strings.TrimSpace(strings.SplitN(tok, "=", 2)[1])
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(tok), "exp=") {
 			continue
 		}
 		if strings.Contains(tok, "=") {
@@ -302,17 +326,21 @@ func checkSPFDomain(ctx context.Context, remoteIP net.IP, domain string, depth i
 		}
 		matched, errRes := matchSPFMechanism(ctx, remoteIP, domain, tok, depth, seen)
 		if errRes != "" {
-			return errRes
+			return errRes, nameOrToken(tok)
 		}
 		if matched {
-			return qualifierToResult(qualifier)
+			return qualifierToResult(qualifier), nameOrToken(tok)
 		}
 	}
 
 	if redirect != "" {
-		return checkSPFDomain(ctx, remoteIP, redirect, depth+1, seen)
+		res, mech := checkSPFDomain(ctx, remoteIP, redirect, depth+1, seen)
+		if mech == "" {
+			mech = "redirect"
+		}
+		return res, "redirect->" + mech
 	}
-	return "neutral"
+	return "neutral", "default-neutral"
 }
 
 func lookupSPFRecord(ctx context.Context, domain string) (record string, status string) {
@@ -323,11 +351,19 @@ func lookupSPFRecord(ctx context.Context, domain string) (record string, status 
 		}
 		return "", "temperror"
 	}
+	matchCount := 0
 	for _, rec := range txts {
 		rec = strings.TrimSpace(rec)
 		if strings.HasPrefix(strings.ToLower(rec), "v=spf1") {
-			return rec, ""
+			matchCount++
+			record = rec
 		}
+	}
+	if matchCount > 1 {
+		return "", "permerror"
+	}
+	if record != "" {
+		return record, ""
 	}
 	return "", "none"
 }
@@ -341,7 +377,7 @@ func matchSPFMechanism(ctx context.Context, remoteIP net.IP, currentDomain, mech
 		if value == "" {
 			return false, "permerror"
 		}
-		res := checkSPFDomain(ctx, remoteIP, value, depth+1, seen)
+		res, _ := checkSPFDomain(ctx, remoteIP, value, depth+1, seen)
 		if res == "pass" {
 			return true, ""
 		}
@@ -365,6 +401,31 @@ func matchSPFMechanism(ctx context.Context, remoteIP net.IP, currentDomain, mech
 			target = currentDomain
 		}
 		return mxResolvesToIP(ctx, target, remoteIP, cidr), ""
+	case "exists":
+		target := value
+		if target == "" {
+			target = currentDomain
+		}
+		ips, err := net.DefaultResolver.LookupHost(ctx, target)
+		if err != nil {
+			if dnsErr, ok := err.(*net.DNSError); ok && dnsErr.IsTemporary {
+				return false, "temperror"
+			}
+			return false, ""
+		}
+		return len(ips) > 0, ""
+	case "ptr":
+		ptrs, err := net.DefaultResolver.LookupAddr(ctx, remoteIP.String())
+		if err != nil {
+			return false, ""
+		}
+		for _, host := range ptrs {
+			host = strings.TrimSuffix(strings.ToLower(host), ".")
+			if strings.HasSuffix(host, strings.ToLower(strings.TrimSpace(value))) {
+				return true, ""
+			}
+		}
+		return false, ""
 	default:
 		return false, ""
 	}
@@ -479,6 +540,20 @@ func parseCIDRBits(v string) int {
 		return -1
 	}
 	return i
+}
+
+func nameOrToken(token string) string {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return ""
+	}
+	if strings.ContainsRune("+-~?", rune(token[0])) {
+		token = token[1:]
+	}
+	if i := strings.Index(token, ":"); i >= 0 {
+		return strings.ToLower(strings.TrimSpace(token[:i]))
+	}
+	return strings.ToLower(token)
 }
 
 func normalizeCIDR(cidr int, bits int) int {

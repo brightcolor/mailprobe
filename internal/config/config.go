@@ -21,8 +21,11 @@ type Config struct {
 	CleanupInterval      time.Duration
 	MaxMessageBytes      int64
 	MaxActivePerIP       int
+	MaxActiveGlobal      int
 	WebRateLimitPerMin   int
+	WebBurstPer10Sec     int
 	SMTPRateLimitPerHour int
+	SMTPBurstPerMin      int
 	EnableRBLChecks      bool
 	RBLProviders         []string
 	EnableSpamAssassin   bool
@@ -30,6 +33,7 @@ type Config struct {
 	EnableRspamd         bool
 	RspamdURL            string
 	RspamdPassword       string
+	AlertWebhookURL      string
 	TrustedProxyCIDRs    []string
 }
 
@@ -47,8 +51,11 @@ func Load() (Config, error) {
 		CleanupInterval:      getEnvDuration("CLEANUP_INTERVAL", 30*time.Minute),
 		MaxMessageBytes:      getEnvInt64("MAX_MESSAGE_BYTES", 2*1024*1024),
 		MaxActivePerIP:       getEnvInt("MAX_ACTIVE_MAILBOXES_PER_IP", 20),
+		MaxActiveGlobal:      getEnvInt("MAX_ACTIVE_MAILBOXES_GLOBAL", 2000),
 		WebRateLimitPerMin:   getEnvInt("WEB_RATE_LIMIT_PER_MIN", 60),
+		WebBurstPer10Sec:     getEnvInt("WEB_BURST_PER_10_SEC", 20),
 		SMTPRateLimitPerHour: getEnvInt("SMTP_RATE_LIMIT_PER_HOUR", 200),
+		SMTPBurstPerMin:      getEnvInt("SMTP_BURST_PER_MIN", 40),
 		EnableRBLChecks:      getEnvBool("ENABLE_RBL_CHECKS", false),
 		RBLProviders:         splitCSV(getEnv("RBL_PROVIDERS", "zen.spamhaus.org,bl.spamcop.net")),
 		EnableSpamAssassin:   getEnvBool("ENABLE_SPAMASSASSIN", false),
@@ -56,6 +63,7 @@ func Load() (Config, error) {
 		EnableRspamd:         getEnvBool("ENABLE_RSPAMD", false),
 		RspamdURL:            getEnv("RSPAMD_URL", "http://rspamd:11334/checkv2"),
 		RspamdPassword:       getEnv("RSPAMD_PASSWORD", ""),
+		AlertWebhookURL:      getEnv("ALERT_WEBHOOK_URL", ""),
 		TrustedProxyCIDRs:    splitCSV(getEnv("TRUSTED_PROXY_CIDRS", "")),
 	}
 
@@ -64,6 +72,9 @@ func Load() (Config, error) {
 	}
 	if cfg.MaxMessageBytes < 512*1024 {
 		return cfg, fmt.Errorf("MAX_MESSAGE_BYTES too low, must be >= 524288")
+	}
+	if cfg.MaxActivePerIP <= 0 || cfg.MaxActiveGlobal <= 0 || cfg.WebRateLimitPerMin <= 0 || cfg.WebBurstPer10Sec <= 0 || cfg.SMTPRateLimitPerHour <= 0 || cfg.SMTPBurstPerMin <= 0 {
+		return cfg, fmt.Errorf("rate and mailbox limits must be > 0")
 	}
 	if cfg.MailboxTTL <= 0 || cfg.RetentionTTL <= 0 || cfg.CleanupInterval <= 0 {
 		return cfg, fmt.Errorf("TTL and cleanup intervals must be > 0")

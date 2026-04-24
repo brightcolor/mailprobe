@@ -1,5 +1,5 @@
 let mailboxPollTimer = null;
-let checkPollTimer = null;
+let checkEventSource = null;
 
 async function copyAddress() {
   const text = document.getElementById('mail-address')?.innerText?.trim();
@@ -18,7 +18,7 @@ async function writeClipboardWithFallback(text) {
       await navigator.clipboard.writeText(text);
       return true;
     } catch (_) {
-      // Fall back to legacy API below.
+      // fallback below
     }
   }
 
@@ -39,6 +39,51 @@ async function writeClipboardWithFallback(text) {
     document.body.removeChild(ta);
   }
   return ok;
+}
+
+async function fetchMailboxStatus(token) {
+  const res = await fetch(`/api/mailboxes/${token}/status`, { cache: 'no-store' });
+  if (!res.ok) {
+    throw new Error('status fetch failed');
+  }
+  return res.json();
+}
+
+function updateMailboxStatusText(data) {
+  const statusText = document.getElementById('status-text');
+  if (!statusText) return;
+
+  if (data.latest_report_path) {
+    statusText.innerHTML = `Neue Mail analysiert (Score: ${data.latest_score}/10). <a href="${data.latest_report_path}">Report oeffnen</a>`;
+    return;
+  }
+  if (data.latest_message_id) {
+    statusText.textContent = 'Mail empfangen, Analyse laeuft noch.';
+    return;
+  }
+  statusText.textContent = 'Warte auf eingehende E-Mail ...';
+}
+
+function setCheckUIState(active, message, tone) {
+  const status = document.getElementById('check-status');
+  const loader = document.getElementById('check-loader');
+  const button = document.getElementById('check-btn');
+  if (!status || !loader || !button) return;
+
+  status.textContent = message;
+  status.classList.remove('is-ok', 'is-warn');
+  if (tone === 'ok') status.classList.add('is-ok');
+  if (tone === 'warn') status.classList.add('is-warn');
+
+  if (active) {
+    loader.classList.remove('d-none');
+    loader.classList.add('is-active');
+    button.disabled = true;
+  } else {
+    loader.classList.add('d-none');
+    loader.classList.remove('is-active');
+    button.disabled = false;
+  }
 }
 
 function setTransientStatus(message, tone) {
@@ -64,96 +109,25 @@ function setTransientStatus(message, tone) {
   setTimeout(() => toast.remove(), 2200);
 }
 
-async function fetchMailboxStatus(token) {
-  const res = await fetch(`/api/mailboxes/${token}/status`, { cache: 'no-store' });
-  if (!res.ok) {
-    throw new Error('status fetch failed');
-  }
-  return res.json();
-}
-
-async function pollMailboxStatus() {
-  const card = document.getElementById('status-card');
-  if (!card) return;
-
-  const token = card.dataset.token;
-  const statusText = document.getElementById('status-text');
-  const stateKey = `mailprobe:lastmsg:${token}`;
-
-  if (!sessionStorage.getItem(stateKey)) {
-    sessionStorage.setItem(stateKey, card.dataset.latestMessageId || '0');
-  }
-
-  try {
-    const data = await fetchMailboxStatus(token);
-    const lastKnown = sessionStorage.getItem(stateKey) || '0';
-    const latest = String(data.latest_message_id || '0');
-
-    if (latest !== '0' && latest !== lastKnown) {
-      sessionStorage.setItem(stateKey, latest);
-      location.reload();
-      return;
-    }
-
-    if (data.latest_report_path) {
-      statusText.innerHTML = `Neue Mail analysiert (Score: ${data.latest_score}/10). <a href="${data.latest_report_path}">Report oeffnen</a>`;
-      return;
-    }
-
-    if (data.latest_message_id) {
-      statusText.textContent = 'Mail empfangen, Analyse laeuft noch.';
-      return;
-    }
-
-    statusText.textContent = 'Warte auf eingehende E-Mail ...';
-  } catch (_) {
-    statusText.textContent = 'Statusabfrage fehlgeschlagen. Bitte Seite neu laden.';
+function closeCheckStream() {
+  if (checkEventSource) {
+    checkEventSource.close();
+    checkEventSource = null;
   }
 }
 
-function setCheckUIState(active, message, tone) {
-  const status = document.getElementById('check-status');
-  const loader = document.getElementById('check-loader');
-  const button = document.getElementById('check-btn');
-  if (!status || !loader || !button) return;
-
-  status.textContent = message;
-  status.classList.remove('is-ok', 'is-warn');
-  if (tone === 'ok') status.classList.add('is-ok');
-  if (tone === 'warn') status.classList.add('is-warn');
-
-  if (active) {
-    loader.classList.remove('d-none');
-    loader.classList.add('is-active');
-    button.disabled = true;
-  } else {
-    loader.classList.add('d-none');
-    loader.classList.remove('is-active');
-    button.disabled = false;
+function handleCheckStatusEvent(data) {
+  if (data.latest_report_path) {
+    setCheckUIState(false, 'Report ist bereit. Weiterleitung...', 'ok');
+    closeCheckStream();
+    window.location.href = data.latest_report_path;
+    return;
   }
-}
-
-async function runCheckOnce(token) {
-  try {
-    const data = await fetchMailboxStatus(token);
-
-    if (data.latest_report_path) {
-      setCheckUIState(false, 'Report ist bereit. Weiterleitung...', 'ok');
-      window.location.href = data.latest_report_path;
-      return true;
-    }
-
-    if (data.latest_message_id) {
-      setCheckUIState(true, 'Mail ist eingegangen. Analyse laeuft ...', 'warn');
-      return false;
-    }
-
-    setCheckUIState(true, 'Noch keine E-Mail eingegangen. Ich warte weiter ...', 'warn');
-    return false;
-  } catch (_) {
-    setCheckUIState(false, 'Check fehlgeschlagen. Bitte erneut klicken.', 'warn');
-    return true;
+  if (data.latest_message_id) {
+    setCheckUIState(true, 'Mail ist eingegangen. Analyse laeuft ...', 'warn');
+    return;
   }
+  setCheckUIState(true, 'Noch keine E-Mail eingegangen. Ich warte weiter ...', 'warn');
 }
 
 function startCheckLoop() {
@@ -161,23 +135,49 @@ function startCheckLoop() {
   const token = panel?.dataset?.token;
   if (!token) return;
 
-  if (checkPollTimer) {
-    clearInterval(checkPollTimer);
-    checkPollTimer = null;
+  setCheckUIState(true, 'Pruefe Eingang ...', 'warn');
+  closeCheckStream();
+
+  if (window.EventSource) {
+    const es = new EventSource(`/api/mailboxes/${token}/events`);
+    checkEventSource = es;
+
+    es.addEventListener('status', (evt) => {
+      try {
+        const data = JSON.parse(evt.data);
+        handleCheckStatusEvent(data);
+      } catch (_) {
+        setCheckUIState(false, 'Ungueltige Event-Daten erhalten.', 'warn');
+      }
+    });
+
+    es.addEventListener('error', () => {
+      setCheckUIState(false, 'Event-Stream unterbrochen. Bitte erneut auf Check klicken.', 'warn');
+      closeCheckStream();
+    });
+    return;
   }
 
-  setCheckUIState(true, 'Pruefe Eingang ...', 'warn');
-
-  runCheckOnce(token).then((done) => {
-    if (done) return;
-    checkPollTimer = setInterval(async () => {
-      const finished = await runCheckOnce(token);
-      if (finished && checkPollTimer) {
-        clearInterval(checkPollTimer);
-        checkPollTimer = null;
+  // Fallback for browsers without EventSource support.
+  if (mailboxPollTimer) clearInterval(mailboxPollTimer);
+  const runFallback = async () => {
+    try {
+      const data = await fetchMailboxStatus(token);
+      handleCheckStatusEvent(data);
+      if (data.latest_report_path && mailboxPollTimer) {
+        clearInterval(mailboxPollTimer);
+        mailboxPollTimer = null;
       }
-    }, 2500);
-  });
+    } catch (_) {
+      setCheckUIState(false, 'Check fehlgeschlagen. Bitte erneut klicken.', 'warn');
+      if (mailboxPollTimer) {
+        clearInterval(mailboxPollTimer);
+        mailboxPollTimer = null;
+      }
+    }
+  };
+  runFallback();
+  mailboxPollTimer = setInterval(runFallback, 2500);
 }
 
 function setupCheckButton() {
@@ -190,12 +190,56 @@ function setupMailboxPolling() {
   const card = document.getElementById('status-card');
   if (!card) return;
 
-  if (mailboxPollTimer) {
-    clearInterval(mailboxPollTimer);
+  const token = card.dataset.token;
+  const stateKey = `mailprobe:lastmsg:${token}`;
+  if (!sessionStorage.getItem(stateKey)) {
+    sessionStorage.setItem(stateKey, card.dataset.latestMessageId || '0');
   }
 
-  pollMailboxStatus();
-  mailboxPollTimer = setInterval(pollMailboxStatus, 5000);
+  const onStatus = (data) => {
+    const lastKnown = sessionStorage.getItem(stateKey) || '0';
+    const latest = String(data.latest_message_id || '0');
+    if (latest !== '0' && latest !== lastKnown) {
+      sessionStorage.setItem(stateKey, latest);
+      location.reload();
+      return;
+    }
+    updateMailboxStatusText(data);
+  };
+
+  if (window.EventSource) {
+    const es = new EventSource(`/api/mailboxes/${token}/events`);
+    es.addEventListener('status', (evt) => {
+      try {
+        onStatus(JSON.parse(evt.data));
+      } catch (_) {
+        document.getElementById('status-text').textContent = 'Statusabfrage fehlgeschlagen. Bitte Seite neu laden.';
+      }
+    });
+    es.addEventListener('error', () => {
+      es.close();
+      document.getElementById('status-text').textContent = 'Event-Stream unterbrochen. Wechsle auf Polling.';
+      startMailboxPollingFallback(token, onStatus);
+    });
+    return;
+  }
+
+  startMailboxPollingFallback(token, onStatus);
+}
+
+function startMailboxPollingFallback(token, onStatus) {
+  if (mailboxPollTimer) clearInterval(mailboxPollTimer);
+  const run = async () => {
+    try {
+      const data = await fetchMailboxStatus(token);
+      onStatus(data);
+    } catch (_) {
+      const statusText = document.getElementById('status-text');
+      if (statusText) statusText.textContent = 'Statusabfrage fehlgeschlagen. Bitte Seite neu laden.';
+    }
+  };
+  run();
+  mailboxPollTimer = setInterval(run, 5000);
 }
 
 setupCheckButton();

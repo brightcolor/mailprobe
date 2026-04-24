@@ -41,6 +41,9 @@ func TestReportUsesTokenURLAndInlineRawAccordion(t *testing.T) {
 	if !strings.Contains(body, "rawAccordion") {
 		t.Fatalf("expected inline raw accordion in report page")
 	}
+	if !strings.Contains(body, "Plaintext View") || !strings.Contains(body, "HTML Source View") {
+		t.Fatalf("expected plaintext/html sections in report page")
+	}
 	if !strings.Contains(body, msg.HeaderBlock) {
 		t.Fatalf("expected header block in report page")
 	}
@@ -64,6 +67,73 @@ func TestReportUsesTokenURLAndInlineRawAccordion(t *testing.T) {
 	}
 
 	_ = st
+}
+
+func TestHomeGeneratesNewMailboxOnEachOpen(t *testing.T) {
+	restoreWD := chdirToRepoRoot(t)
+	defer restoreWD()
+
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "home.db")
+	sqlDB, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	st := store.New(sqlDB)
+	cfg := config.Config{
+		AppName:              "MailProbe",
+		PublicBaseURL:        "http://localhost:8080",
+		SMTPDomain:           "example.test",
+		MailboxTTL:           time.Hour,
+		MaxActivePerIP:       100,
+		MaxActiveGlobal:      1000,
+		WebRateLimitPerMin:   1000,
+		WebBurstPer10Sec:     1000,
+		SMTPRateLimitPerHour: 1000,
+	}
+	srv, err := New(cfg, st, nil, nil)
+	if err != nil {
+		t.Fatalf("new web server: %v", err)
+	}
+	h := srv.Handler()
+
+	req1 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req1.RemoteAddr = "203.0.113.10:12345"
+	rr1 := httptest.NewRecorder()
+	h.ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("first home request expected 200, got %d", rr1.Code)
+	}
+	cookies1 := rr1.Result().Cookies()
+	if len(cookies1) == 0 {
+		t.Fatal("expected mailbox cookie on first home response")
+	}
+	token1 := strings.TrimSpace(cookies1[0].Value)
+	if token1 == "" {
+		t.Fatal("expected non-empty mailbox token in first cookie")
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req2.RemoteAddr = "203.0.113.10:12345"
+	req2.AddCookie(&http.Cookie{Name: "mailprobe_mailbox", Value: token1})
+	rr2 := httptest.NewRecorder()
+	h.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("second home request expected 200, got %d", rr2.Code)
+	}
+	cookies2 := rr2.Result().Cookies()
+	if len(cookies2) == 0 {
+		t.Fatal("expected mailbox cookie on second home response")
+	}
+	token2 := strings.TrimSpace(cookies2[0].Value)
+	if token2 == "" {
+		t.Fatal("expected non-empty mailbox token in second cookie")
+	}
+	if token2 == token1 {
+		t.Fatalf("expected fresh token on each home request, got same token %q", token2)
+	}
 }
 
 func TestMailboxStatusReturnsTokenizedReportPath(t *testing.T) {
@@ -148,8 +218,9 @@ func prepareWebTestFixture(t *testing.T) (*Server, *store.Store, model.Mailbox, 
 		SMTPDomain:         "example.test",
 		MailboxTTL:         time.Hour,
 		WebRateLimitPerMin: 1000,
+		WebBurstPer10Sec:   1000,
 	}
-	srv, err := New(cfg, st, nil)
+	srv, err := New(cfg, st, nil, nil)
 	if err != nil {
 		t.Fatalf("new web server: %v", err)
 	}

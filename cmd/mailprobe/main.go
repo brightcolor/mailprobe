@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,27 +20,35 @@ import (
 	"github.com/brightcolor/mailprobe/internal/ratelimit"
 	"github.com/brightcolor/mailprobe/internal/smtp"
 	"github.com/brightcolor/mailprobe/internal/store"
+	"github.com/brightcolor/mailprobe/internal/telemetry"
 	"github.com/brightcolor/mailprobe/internal/web"
 )
 
 func main() {
-	logger := log.New(os.Stdout, "", log.LstdFlags|log.LUTC)
+	slogHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+	slogLogger := slog.New(slogHandler)
+	logger := slog.NewLogLogger(slogHandler, slog.LevelInfo)
 	cfg, err := config.Load()
 	if err != nil {
-		logger.Fatalf("config error: %v", err)
+		slogLogger.Error("config error", "error", err)
+		os.Exit(1)
 	}
 
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
-		logger.Fatalf("data dir: %v", err)
+		slogLogger.Error("data dir error", "error", err)
+		os.Exit(1)
 	}
 
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
-		logger.Fatalf("db open: %v", err)
+		slogLogger.Error("db open error", "error", err)
+		os.Exit(1)
 	}
 	defer database.Close()
 
 	st := store.New(database)
+	metrics := telemetry.New()
+	alerter := telemetry.NewAlerter(cfg.AlertWebhookURL)
 	engine := analyzer.New(analyzer.Options{
 		EnableRBLChecks:      cfg.EnableRBLChecks,
 		RBLProviders:         cfg.RBLProviders,
@@ -55,9 +64,10 @@ func main() {
 
 	cleanup.Start(ctx, logger, st, cfg.CleanupInterval, cfg.RetentionTTL)
 
-	webServer, err := web.New(cfg, st, logger)
+	webServer, err := web.New(cfg, st, logger, metrics)
 	if err != nil {
-		logger.Fatalf("web init: %v", err)
+		slogLogger.Error("web init error", "error", err)
+		os.Exit(1)
 	}
 
 	httpSrv := &http.Server{
@@ -70,23 +80,39 @@ func main() {
 	}
 
 	smtpLimiter := ratelimit.New(time.Hour, cfg.SMTPRateLimitPerHour)
+	smtpBurstLimiter := ratelimit.New(time.Minute, cfg.SMTPBurstPerMin)
 	smtpSrv := &smtp.Server{
 		Addr:            cfg.SMTPListenAddr,
 		Domain:          cfg.SMTPDomain,
 		MaxMessageBytes: cfg.MaxMessageBytes,
 		RateLimiter:     smtpLimiter,
-		Logger:          logger,
+		BurstLimiter:    smtpBurstLimiter,
+		OnRateLimited: func(remoteIP string) {
+			metrics.IncSMTPRateLimited()
+			logger.Printf("smtp rate limited remote_ip=%s", remoteIP)
+		},
+		Logger: logger,
 		AllowRecipient: func(ctx context.Context, rcpt string) bool {
 			return isAllowedRecipient(ctx, st, cfg, rcpt)
 		},
 		HandleMail: func(ctx context.Context, rm smtp.ReceivedMail) error {
-			return processInbound(ctx, st, engine, cfg, logger, rm)
+			if err := processInbound(ctx, st, engine, cfg, logger, metrics, alerter, rm); err != nil {
+				metrics.IncInboundErrors()
+				_ = alerter.Send(ctx, "error", "inbound_processing_failed", "Inbound processing failed", map[string]any{
+					"remote_ip": rm.RemoteIP,
+					"mail_from": rm.MailFrom,
+					"rcpt_to":   rm.RcptTo,
+					"error":     err.Error(),
+				})
+				return err
+			}
+			return nil
 		},
 	}
 
 	errCh := make(chan error, 2)
 	go func() {
-		logger.Printf("http: listening on %s", cfg.HTTPListenAddr)
+		slogLogger.Info("http listening", "addr", cfg.HTTPListenAddr)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -100,9 +126,9 @@ func main() {
 
 	select {
 	case <-ctx.Done():
-		logger.Printf("shutdown signal received")
+		slogLogger.Info("shutdown signal received")
 	case err := <-errCh:
-		logger.Printf("fatal service error: %v", err)
+		slogLogger.Error("fatal service error", "error", err)
 	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -110,10 +136,10 @@ func main() {
 	_ = httpSrv.Shutdown(shutdownCtx)
 	cancel()
 	smtpSrv.Wait()
-	logger.Printf("shutdown complete")
+	slogLogger.Info("shutdown complete")
 }
 
-func processInbound(ctx context.Context, st *store.Store, engine *analyzer.Engine, cfg config.Config, logger *log.Logger, rm smtp.ReceivedMail) error {
+func processInbound(ctx context.Context, st *store.Store, engine *analyzer.Engine, cfg config.Config, logger *log.Logger, metrics *telemetry.Counters, alerter *telemetry.Alerter, rm smtp.ReceivedMail) error {
 	rcpt := strings.ToLower(strings.TrimSpace(rm.RcptTo))
 	if !strings.HasSuffix(rcpt, "@"+strings.ToLower(cfg.SMTPDomain)) {
 		return nil
@@ -149,10 +175,19 @@ func processInbound(ctx context.Context, st *store.Store, engine *analyzer.Engin
 	if err != nil {
 		return err
 	}
+	metrics.IncMailsReceived()
 
 	report := engine.Analyze(ctx, analyzer.Input{Message: msg, SMTPDomain: cfg.SMTPDomain})
 	if _, err := st.SaveReport(ctx, report); err != nil {
+		metrics.IncAnalyzerErrors()
 		logger.Printf("analyze/store report error msg=%d: %v", msg.ID, err)
+		_ = alerter.Send(ctx, "warn", "report_store_failed", "Analyzer report persistence failed", map[string]any{
+			"message_id": msg.ID,
+			"mailbox_id": mb.ID,
+			"error":      err.Error(),
+		})
+	} else {
+		metrics.IncReportsGenerated()
 	}
 	_ = st.TouchMailbox(ctx, mb.ID)
 	logger.Printf("smtp: received message mailbox=%s msg=%d size=%d", mb.Token, msg.ID, len(rm.Data))

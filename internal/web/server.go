@@ -1,18 +1,27 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
+	"mime"
+	"mime/multipart"
+	"mime/quotedprintable"
 	"net"
 	"net/http"
+	"net/mail"
+	"net/textproto"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -21,18 +30,22 @@ import (
 	"github.com/brightcolor/mailprobe/internal/model"
 	"github.com/brightcolor/mailprobe/internal/ratelimit"
 	"github.com/brightcolor/mailprobe/internal/store"
+	"github.com/brightcolor/mailprobe/internal/telemetry"
 )
 
 type Server struct {
-	cfg      config.Config
-	store    *store.Store
-	logger   *log.Logger
-	tmpl     *template.Template
-	limiter  *ratelimit.Limiter
-	staticFS http.Handler
+	cfg          config.Config
+	store        *store.Store
+	logger       *log.Logger
+	tmpl         *template.Template
+	limiter      *ratelimit.Limiter
+	burstLimiter *ratelimit.Limiter
+	metrics      *telemetry.Counters
+	staticFS     http.Handler
 }
 
 var errActiveMailboxLimit = errors.New("active mailbox limit reached for ip")
+var errGlobalActiveMailboxLimit = errors.New("active mailbox limit reached globally")
 
 type HomeData struct {
 	AppName   string
@@ -50,16 +63,21 @@ type MailboxData struct {
 }
 
 type ReportData struct {
-	AppName  string
-	Message  model.Message
-	Mailbox  model.Mailbox
-	Report   model.AnalysisReport
-	Statuses map[string]int
+	AppName        string
+	Message        model.Message
+	Mailbox        model.Mailbox
+	Report         model.AnalysisReport
+	Statuses       map[string]int
+	PlainTextBody  string
+	HTMLSourceBody string
 }
 
-func New(cfg config.Config, st *store.Store, logger *log.Logger) (*Server, error) {
+func New(cfg config.Config, st *store.Store, logger *log.Logger, metrics *telemetry.Counters) (*Server, error) {
 	if logger == nil {
 		logger = log.Default()
+	}
+	if metrics == nil {
+		metrics = telemetry.New()
 	}
 	t, err := template.New("").Funcs(template.FuncMap{
 		"msgref": messageReference,
@@ -68,12 +86,14 @@ func New(cfg config.Config, st *store.Store, logger *log.Logger) (*Server, error
 		return nil, err
 	}
 	return &Server{
-		cfg:      cfg,
-		store:    st,
-		logger:   logger,
-		tmpl:     t,
-		limiter:  ratelimit.New(time.Minute, cfg.WebRateLimitPerMin),
-		staticFS: http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join("internal", "web", "static")))),
+		cfg:          cfg,
+		store:        st,
+		logger:       logger,
+		tmpl:         t,
+		limiter:      ratelimit.New(time.Minute, cfg.WebRateLimitPerMin),
+		burstLimiter: ratelimit.New(10*time.Second, cfg.WebBurstPer10Sec),
+		metrics:      metrics,
+		staticFS:     http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join("internal", "web", "static")))),
 	}, nil
 }
 
@@ -83,6 +103,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/", s.home)
 	mux.HandleFunc("/healthz", s.health)
 	mux.HandleFunc("/readyz", s.ready)
+	mux.HandleFunc("/metrics", s.metricsPage)
 	mux.HandleFunc("/api/mailboxes", s.createMailbox)
 	mux.HandleFunc("/api/mailboxes/", s.mailboxAPI)
 	mux.HandleFunc("/mailbox/", s.mailboxPage)
@@ -93,12 +114,13 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) withRateLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/healthz") || strings.HasPrefix(r.URL.Path, "/readyz") || strings.HasPrefix(r.URL.Path, "/static/") {
+		if strings.HasPrefix(r.URL.Path, "/healthz") || strings.HasPrefix(r.URL.Path, "/readyz") || strings.HasPrefix(r.URL.Path, "/metrics") || strings.HasPrefix(r.URL.Path, "/static/") {
 			next.ServeHTTP(w, r)
 			return
 		}
 		ip := s.clientIP(r)
-		if !s.limiter.Allow("web:" + ip) {
+		if !s.limiter.Allow("web:minute:"+ip) || !s.burstLimiter.Allow("web:burst:"+ip) {
+			s.metrics.IncWebRateLimited()
 			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
@@ -109,8 +131,10 @@ func (s *Server) withRateLimit(next http.Handler) http.Handler {
 func (s *Server) withLogging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		next.ServeHTTP(w, r)
-		s.logger.Printf("http: %s %s from=%s dur=%s", r.Method, r.URL.Path, s.clientIP(r), time.Since(start).Round(time.Millisecond))
+		s.metrics.IncHTTPRequests()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		s.logger.Printf("http method=%s path=%s status=%d from=%s dur=%s", r.Method, r.URL.Path, rec.status, s.clientIP(r), time.Since(start).Round(time.Millisecond))
 	})
 }
 
@@ -124,6 +148,15 @@ func (s *Server) ready(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte("ready"))
 }
 
+func (s *Server) metricsPage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	_, _ = w.Write([]byte(s.metrics.RenderPrometheus()))
+}
+
 func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -134,17 +167,18 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ip := s.clientIP(r)
-	forceNew := r.URL.Query().Get("new") == "1"
-
 	var preferredToken string
 	if c, err := r.Cookie("mailprobe_mailbox"); err == nil {
 		preferredToken = strings.TrimSpace(c.Value)
 	}
-
-	mb, err := s.getOrCreateHomeMailbox(r.Context(), ip, preferredToken, forceNew)
+	mb, err := s.getOrCreateHomeMailbox(r.Context(), ip, preferredToken, true)
 	if err != nil {
 		if errors.Is(err, errActiveMailboxLimit) {
 			http.Error(w, "too many active mailboxes for this IP", http.StatusTooManyRequests)
+			return
+		}
+		if errors.Is(err, errGlobalActiveMailboxLimit) {
+			http.Error(w, "too many active mailboxes globally", http.StatusTooManyRequests)
 			return
 		}
 		http.Error(w, "could not prepare mailbox", http.StatusInternalServerError)
@@ -188,6 +222,15 @@ func (s *Server) createMailbox(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "too many active mailboxes for this IP", http.StatusTooManyRequests)
 		return
 	}
+	activeGlobal, err := s.store.CountActiveMailboxes(ctx)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	if activeGlobal >= s.cfg.MaxActiveGlobal {
+		http.Error(w, "too many active mailboxes globally", http.StatusTooManyRequests)
+		return
+	}
 
 	token, addr, err := s.generateMailboxAddress(ctx)
 	if err != nil {
@@ -199,6 +242,7 @@ func (s *Server) createMailbox(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not create mailbox", http.StatusInternalServerError)
 		return
 	}
+	s.metrics.IncMailboxesCreated()
 
 	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 		jsonResp(w, http.StatusCreated, map[string]any{
@@ -307,17 +351,20 @@ func (s *Server) reportPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	plainText, htmlSource := messageBodyViews(selected.Message.RawSource)
 	statuses := map[string]int{"pass": 0, "warn": 0, "fail": 0, "info": 0}
 	sortChecks(selected.Report.Checks)
 	for _, c := range selected.Report.Checks {
 		statuses[c.Status]++
 	}
 	s.render(w, "report", ReportData{
-		AppName:  s.cfg.AppName,
-		Message:  selected.Message,
-		Mailbox:  mb,
-		Report:   *selected.Report,
-		Statuses: statuses,
+		AppName:        s.cfg.AppName,
+		Message:        selected.Message,
+		Mailbox:        mb,
+		Report:         *selected.Report,
+		Statuses:       statuses,
+		PlainTextBody:  plainText,
+		HTMLSourceBody: htmlSource,
 	})
 }
 
@@ -390,22 +437,14 @@ func (s *Server) mailboxAPI(w http.ResponseWriter, r *http.Request) {
 			jsonResp(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
-		msgs, err := s.store.ListMessagesWithReports(ctx, mb.ID, 1)
+		resp, err := s.mailboxStatusPayload(ctx, mb, 1)
 		if err != nil {
 			jsonResp(w, http.StatusInternalServerError, map[string]string{"error": "db error"})
 			return
 		}
-		resp := map[string]any{"mailbox": mb.Address, "expires_at": mb.ExpiresAt, "message_count": 0}
-		if len(msgs) > 0 {
-			resp["message_count"] = 1
-			resp["latest_message_id"] = msgs[0].Message.ID
-			resp["latest_received_at"] = msgs[0].Message.ReceivedAt
-			if msgs[0].Report != nil {
-				resp["latest_report_path"] = fmt.Sprintf("/report/%s?msg=%s", mb.Token, messageReference(mb.Token, msgs[0].Message.ID))
-				resp["latest_score"] = msgs[0].Report.Score
-			}
-		}
 		jsonResp(w, http.StatusOK, resp)
+	case action == "events" && r.Method == http.MethodGet:
+		s.mailboxEvents(w, r, token)
 	case action == "delete" && r.Method == http.MethodPost:
 		err := s.store.DeleteMailboxByToken(ctx, token)
 		if err != nil {
@@ -419,6 +458,78 @@ func (s *Server) mailboxAPI(w http.ResponseWriter, r *http.Request) {
 		jsonResp(w, http.StatusOK, map[string]string{"status": "deleted"})
 	default:
 		http.NotFound(w, r)
+	}
+}
+
+func (s *Server) mailboxStatusPayload(ctx context.Context, mb model.Mailbox, limit int) (map[string]any, error) {
+	msgs, err := s.store.ListMessagesWithReports(ctx, mb.ID, limit)
+	if err != nil {
+		return nil, err
+	}
+	resp := map[string]any{"mailbox": mb.Address, "expires_at": mb.ExpiresAt, "message_count": 0}
+	if len(msgs) > 0 {
+		resp["message_count"] = len(msgs)
+		resp["latest_message_id"] = msgs[0].Message.ID
+		resp["latest_received_at"] = msgs[0].Message.ReceivedAt
+		if msgs[0].Report != nil {
+			resp["latest_report_path"] = fmt.Sprintf("/report/%s?msg=%s", mb.Token, messageReference(mb.Token, msgs[0].Message.ID))
+			resp["latest_score"] = msgs[0].Report.Score
+		}
+	}
+	return resp, nil
+}
+
+func (s *Server) mailboxEvents(w http.ResponseWriter, r *http.Request, token string) {
+	mb, err := s.store.GetMailboxByToken(r.Context(), token)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	lastPayload := ""
+	send := func() error {
+		resp, err := s.mailboxStatusPayload(r.Context(), mb, 1)
+		if err != nil {
+			return err
+		}
+		raw, _ := json.Marshal(resp)
+		if string(raw) == lastPayload {
+			return nil
+		}
+		lastPayload = string(raw)
+		_, _ = fmt.Fprintf(w, "event: status\ndata: %s\n\n", raw)
+		flusher.Flush()
+		return nil
+	}
+
+	if err := send(); err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			if err := send(); err != nil {
+				_, _ = fmt.Fprintf(w, "event: error\ndata: {\"error\":\"db error\"}\n\n")
+				flusher.Flush()
+				return
+			}
+		}
 	}
 }
 
@@ -512,10 +623,134 @@ func (s *Server) getOrCreateHomeMailbox(ctx context.Context, ip, preferredToken 
 	if active >= s.cfg.MaxActivePerIP {
 		return model.Mailbox{}, errActiveMailboxLimit
 	}
+	activeGlobal, err := s.store.CountActiveMailboxes(ctx)
+	if err != nil {
+		return model.Mailbox{}, err
+	}
+	if activeGlobal >= s.cfg.MaxActiveGlobal {
+		return model.Mailbox{}, errGlobalActiveMailboxLimit
+	}
 
 	token, addr, err := s.generateMailboxAddress(ctx)
 	if err != nil {
 		return model.Mailbox{}, err
 	}
-	return s.store.CreateMailbox(ctx, token, addr, ip, s.cfg.MailboxTTL)
+	mb, err := s.store.CreateMailbox(ctx, token, addr, ip, s.cfg.MailboxTTL)
+	if err != nil {
+		return model.Mailbox{}, err
+	}
+	if forceNew && preferredToken != "" && preferredToken != mb.Token {
+		if oldBox, oldErr := s.store.GetMailboxByToken(ctx, preferredToken); oldErr == nil {
+			msgs, listErr := s.store.ListMessagesByMailbox(ctx, oldBox.ID, 1)
+			if listErr == nil && len(msgs) == 0 {
+				_ = s.store.DeleteMailboxByToken(ctx, oldBox.Token)
+			}
+		}
+	}
+	s.metrics.IncMailboxesCreated()
+	return mb, nil
+}
+
+var htmlTagPattern = regexp.MustCompile(`(?s)<[^>]*>`)
+
+func messageBodyViews(raw string) (plainText string, htmlSource string) {
+	msg, err := mail.ReadMessage(strings.NewReader(raw))
+	if err != nil {
+		return "", ""
+	}
+	body, err := io.ReadAll(io.LimitReader(msg.Body, 5*1024*1024))
+	if err != nil {
+		return "", ""
+	}
+	plainText, htmlSource = extractBodyViews(textproto.MIMEHeader(msg.Header), body)
+	if plainText == "" && htmlSource != "" {
+		plainText = strings.TrimSpace(stripHTMLTags(htmlSource))
+	}
+	return strings.TrimSpace(plainText), strings.TrimSpace(htmlSource)
+}
+
+func extractBodyViews(headers textproto.MIMEHeader, body []byte) (plainText string, htmlSource string) {
+	contentType := headers.Get("Content-Type")
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		decoded := decodeTransferBody(headers, body)
+		return strings.TrimSpace(decoded), ""
+	}
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	switch {
+	case strings.HasPrefix(mediaType, "multipart/"):
+		boundary := strings.TrimSpace(params["boundary"])
+		if boundary == "" {
+			return strings.TrimSpace(decodeTransferBody(headers, body)), ""
+		}
+		mr := multipart.NewReader(bytes.NewReader(body), boundary)
+		for {
+			part, partErr := mr.NextPart()
+			if partErr != nil {
+				break
+			}
+			partBody, readErr := io.ReadAll(io.LimitReader(part, 3*1024*1024))
+			_ = part.Close()
+			if readErr != nil {
+				continue
+			}
+			pText, pHTML := extractBodyViews(part.Header, partBody)
+			if plainText == "" && pText != "" {
+				plainText = pText
+			}
+			if htmlSource == "" && pHTML != "" {
+				htmlSource = pHTML
+			}
+		}
+		return strings.TrimSpace(plainText), strings.TrimSpace(htmlSource)
+	case mediaType == "text/plain":
+		return strings.TrimSpace(decodeTransferBody(headers, body)), ""
+	case mediaType == "text/html":
+		return "", strings.TrimSpace(decodeTransferBody(headers, body))
+	default:
+		decoded := decodeTransferBody(headers, body)
+		return strings.TrimSpace(decoded), ""
+	}
+}
+
+func decodeTransferBody(headers textproto.MIMEHeader, body []byte) string {
+	enc := strings.ToLower(strings.TrimSpace(headers.Get("Content-Transfer-Encoding")))
+	switch enc {
+	case "base64":
+		decoded, err := base64.StdEncoding.DecodeString(removeWhitespace(string(body)))
+		if err == nil {
+			return string(decoded)
+		}
+		return string(body)
+	case "quoted-printable":
+		reader := quotedprintable.NewReader(bytes.NewReader(body))
+		decoded, err := io.ReadAll(reader)
+		if err == nil {
+			return string(decoded)
+		}
+		return string(body)
+	default:
+		return string(body)
+	}
+}
+
+func removeWhitespace(s string) string {
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\n", "")
+	return strings.TrimSpace(s)
+}
+
+func stripHTMLTags(s string) string {
+	out := htmlTagPattern.ReplaceAllString(s, " ")
+	return strings.Join(strings.Fields(out), " ")
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
 }

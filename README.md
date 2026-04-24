@@ -1,5 +1,7 @@
 # MailProbe
 
+[![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](./CONTRIBUTING.md)
+
 Quickstart: `bash <(curl -fsSL https://raw.githubusercontent.com/brightcolor/mailprobe/main/scripts/quickstart.sh)`
 
 MailProbe is a self-hosted email deliverability test service.
@@ -165,11 +167,15 @@ Important variables:
 - `DATA_RETENTION_TTL`
 - `CLEANUP_INTERVAL`
 - `MAX_ACTIVE_MAILBOXES_PER_IP`
+- `MAX_ACTIVE_MAILBOXES_GLOBAL`
 - `WEB_RATE_LIMIT_PER_MIN`
+- `WEB_BURST_PER_10_SEC`
 - `SMTP_RATE_LIMIT_PER_HOUR`
+- `SMTP_BURST_PER_MIN`
 - `ENABLE_RBL_CHECKS`, `RBL_PROVIDERS`
 - `ENABLE_SPAMASSASSIN`, `SPAMASSASSIN_HOSTPORT`
 - `ENABLE_RSPAMD`, `RSPAMD_URL`, `RSPAMD_PASSWORD`
+- `ALERT_WEBHOOK_URL` (optional outbound webhook for operational alerts)
 
 ## Security model
 
@@ -206,6 +212,7 @@ Health endpoints:
 
 - `GET /healthz`
 - `GET /readyz`
+- `GET /metrics` (Prometheus text format)
 
 Useful commands:
 
