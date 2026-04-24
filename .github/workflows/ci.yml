@@ -1,4 +1,4 @@
-﻿name: ci
+name: ci
 
 on:
   push:
@@ -26,10 +26,10 @@ jobs:
           cache: true
 
       - name: Download modules
-        run: go mod download
+        run: go mod tidy
 
       - name: Run tests
-        run: go test ./...
+        run: go test -mod=mod ./...
 
   container:
     name: Build and Publish Container
