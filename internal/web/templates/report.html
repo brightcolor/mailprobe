@@ -5,12 +5,15 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Report #{{.Report.ID}} - {{.AppName}}</title>
+  <link rel="stylesheet" href="/static/vendor/bootstrap.min.css" />
   <link rel="stylesheet" href="/static/app.css" />
 </head>
 <body>
-<header class="topbar">
-  <a class="brand" href="/">{{.AppName}}</a>
-  <span class="topbar-note">Analysis report</span>
+<header class="topbar navbar navbar-expand-lg">
+  <div class="container-fluid px-0">
+    <a class="brand navbar-brand" href="/">{{.AppName}}</a>
+    <span class="topbar-note ms-auto">Analysis report</span>
+  </div>
 </header>
 
 <main class="container">
@@ -38,7 +41,7 @@
   <section class="card">
     <h2>Einzelpruefungen</h2>
     <div class="table-wrap">
-      <table>
+      <table class="table table-borderless align-middle">
         <thead>
         <tr><th>Status</th><th>Check</th><th>Bewertung</th><th>Details</th><th>Empfehlung</th></tr>
         </thead>
@@ -88,6 +91,8 @@
     <p><a href="/raw/{{.Message.ID}}/source" target="_blank">Rohmail anzeigen</a></p>
   </section>
 </main>
+
+<script src="/static/vendor/bootstrap.bundle.min.js"></script>
 </body>
 </html>
 {{end}}

@@ -16,6 +16,10 @@ coverage.out
 .gopath/
 *.log
 
+# Frontend tooling cache
+node_modules/
+.npm-cache/
+
 # Editors
 .vscode/
 .idea/

@@ -5,12 +5,15 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Mailbox {{.Mailbox.Token}} - {{.AppName}}</title>
+  <link rel="stylesheet" href="/static/vendor/bootstrap.min.css" />
   <link rel="stylesheet" href="/static/app.css" />
 </head>
 <body>
-<header class="topbar">
-  <a class="brand" href="/">{{.AppName}}</a>
-  <span class="topbar-note">Temporary mailbox</span>
+<header class="topbar navbar navbar-expand-lg">
+  <div class="container-fluid px-0">
+    <a class="brand navbar-brand" href="/">{{.AppName}}</a>
+    <span class="topbar-note ms-auto">Temporary mailbox</span>
+  </div>
 </header>
 
 <main class="container">
@@ -43,7 +46,7 @@
 
     {{if .Messages}}
       <div class="table-wrap">
-        <table>
+        <table class="table table-borderless align-middle">
           <thead>
           <tr>
             <th>Zeit</th>
@@ -75,6 +78,7 @@
     {{end}}
   </section>
 </main>
+<script src="/static/vendor/bootstrap.bundle.min.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

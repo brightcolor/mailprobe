@@ -5,12 +5,15 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>{{.AppName}} - E-Mail Deliverability Check</title>
+  <link rel="stylesheet" href="/static/vendor/bootstrap.min.css" />
   <link rel="stylesheet" href="/static/app.css" />
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="/">{{.AppName}}</a>
-    <span class="topbar-note">Self-hosted deliverability lab</span>
+  <header class="topbar navbar navbar-expand-lg">
+    <div class="container-fluid px-0">
+      <a class="brand navbar-brand" href="/">{{.AppName}}</a>
+      <span class="topbar-note ms-auto">Self-hosted deliverability lab</span>
+    </div>
   </header>
 
   <main class="container">
@@ -45,6 +48,8 @@
       </div>
     </section>
   </main>
+
+  <script src="/static/vendor/bootstrap.bundle.min.js"></script>
 </body>
 </html>
 {{end}}
