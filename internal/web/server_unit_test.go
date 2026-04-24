@@ -65,6 +65,48 @@ func TestMessageBodyViewsMultipartAlternative(t *testing.T) {
 	}
 }
 
+func TestMessageBodyViewsHTMLOnlyBase64(t *testing.T) {
+	raw := strings.Join([]string{
+		"From: sender@example.org",
+		"To: test@example.test",
+		"Subject: HTML",
+		"MIME-Version: 1.0",
+		"Content-Type: text/html; charset=UTF-8",
+		"Content-Transfer-Encoding: base64",
+		"",
+		"PGh0bWw+PGJvZHk+PHA+SGVsbG8gPGI+SFRNTDwvYj48L3A+PC9ib2R5PjwvaHRtbD4=",
+	}, "\r\n")
+
+	plain, html := messageBodyViews(raw)
+	if !strings.Contains(html, "<b>HTML</b>") {
+		t.Fatalf("expected decoded html body, got %q", html)
+	}
+	if !strings.Contains(plain, "Hello HTML") {
+		t.Fatalf("expected stripped plaintext fallback, got %q", plain)
+	}
+}
+
+func TestMessageBodyViewsDecodesNonUTF8Charset(t *testing.T) {
+	raw := strings.Join([]string{
+		"From: sender@example.org",
+		"To: test@example.test",
+		"Subject: Charset",
+		"MIME-Version: 1.0",
+		"Content-Type: text/html; charset=iso-8859-1",
+		"Content-Transfer-Encoding: quoted-printable",
+		"",
+		"<p>Gr=FC=DFe</p>",
+	}, "\r\n")
+
+	plain, html := messageBodyViews(raw)
+	if !strings.Contains(html, "Grüße") {
+		t.Fatalf("expected charset-decoded html, got %q", html)
+	}
+	if !strings.Contains(plain, "Grüße") {
+		t.Fatalf("expected charset-decoded plaintext fallback, got %q", plain)
+	}
+}
+
 func TestClientIPIgnoresForwardedForWithoutTrustedProxy(t *testing.T) {
 	srv := &Server{}
 	req := httptest.NewRequest("GET", "/", nil)

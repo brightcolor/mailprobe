@@ -13,14 +13,14 @@
   <div class="container-fluid px-0">
     <a class="brand navbar-brand" href="/">{{.AppName}}</a>
     <nav class="topbar-nav ms-auto" aria-label="Main">
-      <a href="/">Neuer Test</a>
+      <a href="/">Test</a>
       <a href="/metrics">Metrics</a>
     </nav>
   </div>
 </header>
 
 <main class="container">
-  <section class="mailbox-layout">
+  <section class="mailbox-layout" id="check-panel" data-token="{{.Mailbox.Token}}" data-public-url="{{.PublicURL}}">
     <div class="test-panel compact">
       <p class="eyebrow">Aktive Testadresse</p>
       <h1>Warte auf deine E-Mail</h1>
@@ -30,16 +30,16 @@
         <button class="icon-btn copy-btn" type="button" onclick="copyAddress()" title="Adresse kopieren" aria-label="Adresse kopieren">Copy</button>
       </div>
       <div class="primary-actions">
-        <a class="btn secondary" href="/">Neue Adresse</a>
+        <button id="new-address-btn" class="btn secondary" type="button">Neue Adresse</button>
       </div>
       <dl class="meta-list inline">
         <div>
           <dt>Gueltig bis</dt>
-          <dd>{{.Mailbox.ExpiresAt.Format "2006-01-02 15:04:05 MST"}}</dd>
+          <dd id="mail-expires-at">{{.Mailbox.ExpiresAt.Format "2006-01-02 15:04:05 MST"}}</dd>
         </div>
         <div>
           <dt>Direktlink</dt>
-          <dd><a href="{{.PublicURL}}/mailbox/{{.Mailbox.Token}}">{{.PublicURL}}/mailbox/{{.Mailbox.Token}}</a></dd>
+          <dd><a id="mailbox-direct-link" href="{{.PublicURL}}/mailbox/{{.Mailbox.Token}}">{{.PublicURL}}/mailbox/{{.Mailbox.Token}}</a></dd>
         </div>
       </dl>
     </div>

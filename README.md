@@ -31,6 +31,7 @@ This project is intentionally built for small VPS setups (including ~1 GB RAM en
 
 - Random temporary mailbox addresses (`<token>@SMTP_DOMAIN`)
 - Score-first web UI with a guided send-and-check workflow
+- New test addresses can be generated in-place without a full page reload
 - Multiple active mailboxes in parallel
 - Multiple emails per mailbox
 - Mailbox TTL and automatic expiration
@@ -42,6 +43,7 @@ This project is intentionally built for small VPS setups (including ~1 GB RAM en
 - Score from `0.0` to `10.0`
 - Non-black-box scoring model (rule deltas are visible in report)
 - Report-first layout with status counters, prioritized checks, recommendations, raw views, and JSON export
+- Sandboxed rendered HTML preview plus raw HTML source for received messages
 - Check categories include:
   - SPF (header result + DNS context)
   - DKIM (signature/auth-result heuristics)

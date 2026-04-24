@@ -31,6 +31,7 @@ import (
 	"github.com/brightcolor/mailprobe/internal/ratelimit"
 	"github.com/brightcolor/mailprobe/internal/store"
 	"github.com/brightcolor/mailprobe/internal/telemetry"
+	htmlcharset "golang.org/x/net/html/charset"
 )
 
 type Server struct {
@@ -64,13 +65,14 @@ type MailboxData struct {
 }
 
 type ReportData struct {
-	AppName        string
-	Message        model.Message
-	Mailbox        model.Mailbox
-	Report         model.AnalysisReport
-	Statuses       map[string]int
-	PlainTextBody  string
-	HTMLSourceBody string
+	AppName         string
+	Message         model.Message
+	Mailbox         model.Mailbox
+	Report          model.AnalysisReport
+	Statuses        map[string]int
+	PlainTextBody   string
+	HTMLSourceBody  string
+	HTMLPreviewBody string
 }
 
 func New(cfg config.Config, st *store.Store, logger *log.Logger, metrics *telemetry.Counters) (*Server, error) {
@@ -191,18 +193,7 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not prepare mailbox", http.StatusInternalServerError)
 		return
 	}
-	maxAge := int(time.Until(mb.ExpiresAt).Seconds())
-	if maxAge < 0 {
-		maxAge = 0
-	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     "mailprobe_mailbox",
-		Value:    mb.Token,
-		Path:     "/",
-		MaxAge:   maxAge,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
+	setMailboxCookie(w, mb)
 
 	data := HomeData{
 		AppName:   s.cfg.AppName,
@@ -220,6 +211,10 @@ func (s *Server) createMailbox(w http.ResponseWriter, r *http.Request) {
 	}
 	ip := s.clientIP(r)
 	ctx := r.Context()
+	var preferredToken string
+	if c, err := r.Cookie("mailprobe_mailbox"); err == nil {
+		preferredToken = strings.TrimSpace(c.Value)
+	}
 	active, err := s.store.CountActiveMailboxesByIP(ctx, ip)
 	if err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)
@@ -250,6 +245,15 @@ func (s *Server) createMailbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.metrics.IncMailboxesCreated()
+	if preferredToken != "" && preferredToken != mb.Token {
+		if oldBox, oldErr := s.store.GetMailboxByToken(ctx, preferredToken); oldErr == nil {
+			msgs, listErr := s.store.ListMessagesByMailbox(ctx, oldBox.ID, 1)
+			if listErr == nil && len(msgs) == 0 {
+				_ = s.store.DeleteMailboxByToken(ctx, oldBox.Token)
+			}
+		}
+	}
+	setMailboxCookie(w, mb)
 
 	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 		jsonResp(w, http.StatusCreated, map[string]any{
@@ -257,21 +261,11 @@ func (s *Server) createMailbox(w http.ResponseWriter, r *http.Request) {
 			"address":     mb.Address,
 			"expires_at":  mb.ExpiresAt,
 			"mailbox_url": fmt.Sprintf("%s/mailbox/%s", s.cfg.PublicBaseURL, mb.Token),
+			"status_path": fmt.Sprintf("/api/mailboxes/%s/status", mb.Token),
+			"events_path": fmt.Sprintf("/api/mailboxes/%s/events", mb.Token),
 		})
 		return
 	}
-	maxAge := int(time.Until(mb.ExpiresAt).Seconds())
-	if maxAge < 0 {
-		maxAge = 0
-	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     "mailprobe_mailbox",
-		Value:    mb.Token,
-		Path:     "/",
-		MaxAge:   maxAge,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -358,13 +352,14 @@ func (s *Server) reportPage(w http.ResponseWriter, r *http.Request) {
 		statuses[c.Status]++
 	}
 	s.render(w, "report", ReportData{
-		AppName:        s.cfg.AppName,
-		Message:        selected.Message,
-		Mailbox:        mb,
-		Report:         *selected.Report,
-		Statuses:       statuses,
-		PlainTextBody:  plainText,
-		HTMLSourceBody: htmlSource,
+		AppName:         s.cfg.AppName,
+		Message:         selected.Message,
+		Mailbox:         mb,
+		Report:          *selected.Report,
+		Statuses:        statuses,
+		PlainTextBody:   plainText,
+		HTMLSourceBody:  htmlSource,
+		HTMLPreviewBody: htmlSource,
 	})
 }
 
@@ -706,6 +701,21 @@ func jsonResp(w http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
+func setMailboxCookie(w http.ResponseWriter, mb model.Mailbox) {
+	maxAge := int(time.Until(mb.ExpiresAt).Seconds())
+	if maxAge < 0 {
+		maxAge = 0
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "mailprobe_mailbox",
+		Value:    mb.Token,
+		Path:     "/",
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
 func sortChecks(checks []model.CheckResult) {
 	rank := map[string]int{"fail": 0, "warn": 1, "pass": 2, "info": 3}
 	sort.SliceStable(checks, func(i, j int) bool {
@@ -844,23 +854,47 @@ func extractBodyViews(headers textproto.MIMEHeader, body []byte) (plainText stri
 
 func decodeTransferBody(headers textproto.MIMEHeader, body []byte) string {
 	enc := strings.ToLower(strings.TrimSpace(headers.Get("Content-Transfer-Encoding")))
+	var decoded []byte
 	switch enc {
 	case "base64":
-		decoded, err := base64.StdEncoding.DecodeString(removeWhitespace(string(body)))
+		out, err := base64.StdEncoding.DecodeString(removeWhitespace(string(body)))
 		if err == nil {
-			return string(decoded)
+			decoded = out
+			break
 		}
-		return string(body)
+		decoded = body
 	case "quoted-printable":
 		reader := quotedprintable.NewReader(bytes.NewReader(body))
-		decoded, err := io.ReadAll(reader)
+		out, err := io.ReadAll(reader)
 		if err == nil {
-			return string(decoded)
+			decoded = out
+			break
 		}
-		return string(body)
+		decoded = body
 	default:
+		decoded = body
+	}
+	return decodeCharset(headers, decoded)
+}
+
+func decodeCharset(headers textproto.MIMEHeader, body []byte) string {
+	_, params, err := mime.ParseMediaType(headers.Get("Content-Type"))
+	if err != nil {
 		return string(body)
 	}
+	label := strings.TrimSpace(params["charset"])
+	if label == "" {
+		return string(body)
+	}
+	reader, err := htmlcharset.NewReaderLabel(label, bytes.NewReader(body))
+	if err != nil {
+		return string(body)
+	}
+	decoded, err := io.ReadAll(reader)
+	if err != nil {
+		return string(body)
+	}
+	return string(decoded)
 }
 
 func removeWhitespace(s string) string {

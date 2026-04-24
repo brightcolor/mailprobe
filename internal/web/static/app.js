@@ -1,5 +1,6 @@
 let mailboxPollTimer = null;
 let checkEventSource = null;
+let mailboxEventSource = null;
 
 async function copyAddress() {
   const text = document.getElementById('mail-address')?.innerText?.trim();
@@ -47,6 +48,79 @@ async function fetchMailboxStatus(token) {
     throw new Error('status fetch failed');
   }
   return res.json();
+}
+
+async function createMailbox() {
+  const res = await fetch('/api/mailboxes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    cache: 'no-store',
+    body: '{}',
+  });
+  if (!res.ok) {
+    throw new Error('mailbox create failed');
+  }
+  return res.json();
+}
+
+function formatExpiry(value) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZoneName: 'short',
+  });
+}
+
+function updateMailboxIdentity(data) {
+  const panel = document.getElementById('check-panel');
+  const address = document.getElementById('mail-address');
+  const expires = document.getElementById('mail-expires-at');
+  const link = document.getElementById('mailbox-direct-link');
+  const statusCard = document.getElementById('status-card');
+
+  if (panel) panel.dataset.token = data.token;
+  if (address) address.textContent = data.address;
+  if (expires) expires.textContent = formatExpiry(data.expires_at);
+  if (link) {
+    link.href = data.mailbox_url;
+    link.textContent = data.mailbox_url;
+  }
+  if (statusCard) {
+    statusCard.dataset.token = data.token;
+    statusCard.dataset.latestMessageId = '0';
+  }
+  sessionStorage.setItem(`mailprobe:lastmsg:${data.token}`, '0');
+}
+
+async function createNewAddress() {
+  const button = document.getElementById('new-address-btn');
+  if (!button) return;
+  const oldText = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Erzeuge Adresse ...';
+  closeCheckStream();
+  closeMailboxStream();
+  if (mailboxPollTimer) {
+    clearInterval(mailboxPollTimer);
+    mailboxPollTimer = null;
+  }
+  try {
+    const data = await createMailbox();
+    updateMailboxIdentity(data);
+    setCheckUIState(false, 'Neue Testadresse ist bereit.', 'ok');
+    setupMailboxPolling();
+  } catch (_) {
+    setTransientStatus('Neue Adresse konnte nicht erzeugt werden.', 'warn');
+  } finally {
+    button.disabled = false;
+    button.textContent = oldText;
+  }
 }
 
 function updateMailboxStatusText(data) {
@@ -186,10 +260,24 @@ function setupCheckButton() {
   button.addEventListener('click', startCheckLoop);
 }
 
+function closeMailboxStream() {
+  if (mailboxEventSource) {
+    mailboxEventSource.close();
+    mailboxEventSource = null;
+  }
+}
+
+function setupNewAddressButton() {
+  const button = document.getElementById('new-address-btn');
+  if (!button) return;
+  button.addEventListener('click', createNewAddress);
+}
+
 function setupMailboxPolling() {
   const card = document.getElementById('status-card');
   if (!card) return;
 
+  closeMailboxStream();
   const token = card.dataset.token;
   const stateKey = `mailprobe:lastmsg:${token}`;
   if (!sessionStorage.getItem(stateKey)) {
@@ -209,6 +297,7 @@ function setupMailboxPolling() {
 
   if (window.EventSource) {
     const es = new EventSource(`/api/mailboxes/${token}/events`);
+    mailboxEventSource = es;
     es.addEventListener('status', (evt) => {
       try {
         onStatus(JSON.parse(evt.data));
@@ -218,6 +307,7 @@ function setupMailboxPolling() {
     });
     es.addEventListener('error', () => {
       es.close();
+      if (mailboxEventSource === es) mailboxEventSource = null;
       document.getElementById('status-text').textContent = 'Event-Stream unterbrochen. Wechsle auf Polling.';
       startMailboxPollingFallback(token, onStatus);
     });
@@ -243,4 +333,5 @@ function startMailboxPollingFallback(token, onStatus) {
 }
 
 setupCheckButton();
+setupNewAddressButton();
 setupMailboxPolling();

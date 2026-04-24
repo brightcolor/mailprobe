@@ -21,7 +21,7 @@
   </header>
 
   <main class="container tester-shell">
-    <section class="tester-hero" id="check-panel" data-token="{{.Mailbox.Token}}">
+    <section class="tester-hero" id="check-panel" data-token="{{.Mailbox.Token}}" data-public-url="{{.PublicURL}}">
       <div class="test-panel">
         <p class="eyebrow">Kostenloser Deliverability Check</p>
         <h1>Teste den Spam-Score deiner E-Mail</h1>
@@ -35,7 +35,7 @@
 
         <div class="primary-actions">
           <button id="check-btn" class="btn primary" type="button">Dann Score pruefen</button>
-          <a class="btn secondary" href="/">Neue Testadresse</a>
+          <button id="new-address-btn" class="btn secondary" type="button">Neue Testadresse</button>
         </div>
 
         <div id="check-loader" class="scan-loader d-none" aria-hidden="true">
@@ -71,11 +71,11 @@
         <dl class="meta-list">
           <div>
             <dt>Gueltig bis</dt>
-            <dd>{{.Mailbox.ExpiresAt.Format "2006-01-02 15:04:05 MST"}}</dd>
+            <dd id="mail-expires-at">{{.Mailbox.ExpiresAt.Format "2006-01-02 15:04:05 MST"}}</dd>
           </div>
           <div>
             <dt>Direktlink</dt>
-            <dd><a href="{{.PublicURL}}/mailbox/{{.Mailbox.Token}}">{{.PublicURL}}/mailbox/{{.Mailbox.Token}}</a></dd>
+            <dd><a id="mailbox-direct-link" href="{{.PublicURL}}/mailbox/{{.Mailbox.Token}}">{{.PublicURL}}/mailbox/{{.Mailbox.Token}}</a></dd>
           </div>
         </dl>
       </aside>

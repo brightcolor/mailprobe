@@ -135,10 +135,22 @@
       <div class="accordion-item">
         <h3 class="accordion-header">
           <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#htmlSourceView" aria-expanded="false" aria-controls="htmlSourceView">
-            HTML Source View
+            HTML Preview
           </button>
         </h3>
         <div id="htmlSourceView" class="accordion-collapse collapse" data-bs-parent="#rawAccordion">
+          <div class="accordion-body">
+            {{if .HTMLPreviewBody}}<iframe class="html-preview" sandbox srcdoc="{{.HTMLPreviewBody}}" title="HTML Mail Preview"></iframe>{{else}}<p class="hint">No HTML body found.</p>{{end}}
+          </div>
+        </div>
+      </div>
+      <div class="accordion-item">
+        <h3 class="accordion-header">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#htmlRawView" aria-expanded="false" aria-controls="htmlRawView">
+            HTML Source View
+          </button>
+        </h3>
+        <div id="htmlRawView" class="accordion-collapse collapse" data-bs-parent="#rawAccordion">
           <div class="accordion-body">
             {{if .HTMLSourceBody}}<pre class="raw-block">{{.HTMLSourceBody}}</pre>{{else}}<p class="hint">No HTML body found.</p>{{end}}
           </div>

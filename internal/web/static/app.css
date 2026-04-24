@@ -634,6 +634,14 @@ h3 {
   word-break: break-word;
 }
 
+.html-preview {
+  width: 100%;
+  min-height: 460px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
 .copy-toast {
   position: fixed;
   right: 16px;

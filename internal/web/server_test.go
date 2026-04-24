@@ -136,6 +136,56 @@ func TestHomeGeneratesNewMailboxOnEachOpen(t *testing.T) {
 	}
 }
 
+func TestCreateMailboxJSONReturnsNewAddressWithoutRedirect(t *testing.T) {
+	restoreWD := chdirToRepoRoot(t)
+	defer restoreWD()
+
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "create-json.db")
+	sqlDB, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	st := store.New(sqlDB)
+	cfg := config.Config{
+		AppName:              "MailProbe",
+		PublicBaseURL:        "http://localhost:8080",
+		SMTPDomain:           "example.test",
+		MailboxTTL:           time.Hour,
+		MaxActivePerIP:       100,
+		MaxActiveGlobal:      1000,
+		WebRateLimitPerMin:   1000,
+		WebBurstPer10Sec:     1000,
+		SMTPRateLimitPerHour: 1000,
+	}
+	srv, err := New(cfg, st, nil, nil)
+	if err != nil {
+		t.Fatalf("new web server: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/mailboxes", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "203.0.113.10:12345"
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%q", rr.Code, rr.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json payload: %v", err)
+	}
+	if payload["token"] == "" || payload["address"] == "" || payload["mailbox_url"] == "" {
+		t.Fatalf("missing mailbox fields: %#v", payload)
+	}
+	if len(rr.Result().Cookies()) == 0 {
+		t.Fatal("expected mailbox cookie for AJAX-created mailbox")
+	}
+}
+
 func TestMailboxStatusReturnsTokenizedReportPath(t *testing.T) {
 	restoreWD := chdirToRepoRoot(t)
 	defer restoreWD()
