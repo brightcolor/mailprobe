@@ -378,6 +378,30 @@ tbody tr:hover {
   font-size: 0.9rem;
 }
 
+.accordion {
+  --bs-accordion-bg: color-mix(in srgb, var(--surface) 88%, transparent);
+  --bs-accordion-border-color: var(--border);
+  --bs-accordion-btn-bg: color-mix(in srgb, var(--surface-soft) 90%, transparent);
+  --bs-accordion-btn-color: var(--text);
+  --bs-accordion-active-bg: color-mix(in srgb, var(--primary) 10%, transparent);
+  --bs-accordion-active-color: var(--text);
+}
+
+.raw-block {
+  margin: 0;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 75%, transparent);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 420px;
+  overflow: auto;
+}
+
 code {
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   background: color-mix(in srgb, var(--bg) 70%, transparent);

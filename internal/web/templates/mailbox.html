@@ -64,7 +64,7 @@
             <td><code>{{.Message.SMTPFrom}}</code></td>
             <td>{{if .Report}}{{printf "%.1f" .Report.Score}} / 10{{else}}-{{end}}</td>
             <td>
-              {{if .Report}}<a href="/report/{{.Report.ID}}">Report</a>{{else}}in Analyse{{end}}
+              {{if .Report}}<a href="/report/{{$.Mailbox.Token}}?message={{.Message.ID}}">Report</a>{{else}}in Analyse{{end}}
               | <a href="/raw/{{.Message.ID}}/headers" target="_blank">Header</a>
               | <a href="/raw/{{.Message.ID}}/source" target="_blank">Raw</a>
             </td>

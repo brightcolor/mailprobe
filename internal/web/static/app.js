@@ -33,8 +33,8 @@ async function pollMailboxStatus() {
       return;
     }
 
-    if (data.latest_report_id) {
-      statusText.innerHTML = `Neue Mail analysiert (Score: ${data.latest_score}/10). <a href="/report/${data.latest_report_id}">Report oeffnen</a>`;
+    if (data.latest_report_path) {
+      statusText.innerHTML = `Neue Mail analysiert (Score: ${data.latest_score}/10). <a href="${data.latest_report_path}">Report oeffnen</a>`;
       return;
     }
 

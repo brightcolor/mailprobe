@@ -87,8 +87,33 @@
 
   <section class="card">
     <h2>Rohdaten</h2>
-    <p><a href="/raw/{{.Message.ID}}/headers" target="_blank">Header anzeigen</a></p>
-    <p><a href="/raw/{{.Message.ID}}/source" target="_blank">Rohmail anzeigen</a></p>
+    <div class="accordion" id="rawAccordion">
+      <div class="accordion-item">
+        <h3 class="accordion-header">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#rawHeaders" aria-expanded="false" aria-controls="rawHeaders">
+            Header Block
+          </button>
+        </h3>
+        <div id="rawHeaders" class="accordion-collapse collapse" data-bs-parent="#rawAccordion">
+          <div class="accordion-body">
+            <pre class="raw-block">{{.Message.HeaderBlock}}</pre>
+          </div>
+        </div>
+      </div>
+      <div class="accordion-item">
+        <h3 class="accordion-header">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#rawSource" aria-expanded="false" aria-controls="rawSource">
+            Full Raw Message
+          </button>
+        </h3>
+        <div id="rawSource" class="accordion-collapse collapse" data-bs-parent="#rawAccordion">
+          <div class="accordion-body">
+            <pre class="raw-block">{{.Message.RawSource}}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="hint mt-3">Optional Download: <a href="/raw/{{.Message.ID}}/headers" target="_blank">Header</a> | <a href="/raw/{{.Message.ID}}/source" target="_blank">Raw</a></p>
   </section>
 </main>
 

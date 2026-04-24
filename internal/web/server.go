@@ -1,4 +1,4 @@
-﻿package web
+package web
 
 import (
 	"context"
@@ -161,9 +161,9 @@ func (s *Server) createMailbox(w http.ResponseWriter, r *http.Request) {
 
 	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 		jsonResp(w, http.StatusCreated, map[string]any{
-			"token":      mb.Token,
-			"address":    mb.Address,
-			"expires_at": mb.ExpiresAt,
+			"token":       mb.Token,
+			"address":     mb.Address,
+			"expires_at":  mb.ExpiresAt,
 			"mailbox_url": fmt.Sprintf("%s/mailbox/%s", s.cfg.PublicBaseURL, mb.Token),
 		})
 		return
@@ -213,34 +213,59 @@ func (s *Server) reportPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	idRaw := strings.TrimPrefix(r.URL.Path, "/report/")
-	id, err := strconv.ParseInt(idRaw, 10, 64)
-	if err != nil {
+	token := strings.TrimPrefix(r.URL.Path, "/report/")
+	if token == "" || strings.Contains(token, "/") {
 		http.NotFound(w, r)
 		return
 	}
 	ctx := r.Context()
-	report, err := s.store.GetReport(ctx, id)
-	if err != nil {
-		http.Error(w, "report not found", http.StatusNotFound)
-		return
-	}
-	msg, err := s.store.GetMessage(ctx, report.MessageID)
-	if err != nil {
-		http.Error(w, "message not found", http.StatusNotFound)
-		return
-	}
-	mb, err := s.mailboxByID(ctx, msg.MailboxID)
+	mb, err := s.store.GetMailboxByToken(ctx, token)
 	if err != nil {
 		http.Error(w, "mailbox not found", http.StatusNotFound)
 		return
 	}
+
+	msgs, err := s.store.ListMessagesWithReports(ctx, mb.ID, 100)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+
+	var selected *model.MessageWithReport
+	messageIDQuery := strings.TrimSpace(r.URL.Query().Get("message"))
+	if messageIDQuery != "" {
+		for i := range msgs {
+			if fmt.Sprintf("%d", msgs[i].Message.ID) == messageIDQuery {
+				selected = &msgs[i]
+				break
+			}
+		}
+	}
+	if selected == nil {
+		for i := range msgs {
+			if msgs[i].Report != nil {
+				selected = &msgs[i]
+				break
+			}
+		}
+	}
+	if selected == nil || selected.Report == nil {
+		http.Error(w, "report not found", http.StatusNotFound)
+		return
+	}
+
 	statuses := map[string]int{"pass": 0, "warn": 0, "fail": 0, "info": 0}
-	sortChecks(report.Checks)
-	for _, c := range report.Checks {
+	sortChecks(selected.Report.Checks)
+	for _, c := range selected.Report.Checks {
 		statuses[c.Status]++
 	}
-	s.render(w, "report", ReportData{AppName: s.cfg.AppName, Message: msg, Mailbox: mb, Report: report, Statuses: statuses})
+	s.render(w, "report", ReportData{
+		AppName:  s.cfg.AppName,
+		Message:  selected.Message,
+		Mailbox:  mb,
+		Report:   *selected.Report,
+		Statuses: statuses,
+	})
 }
 
 func (s *Server) rawPage(w http.ResponseWriter, r *http.Request) {
@@ -302,7 +327,7 @@ func (s *Server) mailboxAPI(w http.ResponseWriter, r *http.Request) {
 			resp["latest_message_id"] = msgs[0].Message.ID
 			resp["latest_received_at"] = msgs[0].Message.ReceivedAt
 			if msgs[0].Report != nil {
-				resp["latest_report_id"] = msgs[0].Report.ID
+				resp["latest_report_path"] = fmt.Sprintf("/report/%s?message=%d", mb.Token, msgs[0].Message.ID)
 				resp["latest_score"] = msgs[0].Report.Score
 			}
 		}
