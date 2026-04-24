@@ -98,6 +98,42 @@ a {
   align-items: stretch;
 }
 
+.mailtester-flow {
+  max-width: 900px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.mailtester-flow h1 {
+  margin-left: auto;
+  margin-right: auto;
+  font-size: clamp(2rem, 4.5vw, 3.4rem);
+}
+
+.mailtester-flow .lead {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.flow-step {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.step-number {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 99px;
+  color: #fff;
+  background: var(--primary);
+  font-weight: 800;
+}
+
 .test-panel,
 .side-panel,
 .status-panel,
@@ -201,6 +237,20 @@ h3 {
   font-weight: 700;
 }
 
+.address-box-large {
+  max-width: 760px;
+  margin-left: auto;
+  margin-right: auto;
+  border-color: #b8c5d6;
+  background: #fff;
+  box-shadow: inset 0 2px 4px rgba(20, 31, 48, 0.06);
+}
+
+.address-box-large code {
+  text-align: center;
+  font-size: clamp(1.05rem, 2.6vw, 1.7rem);
+}
+
 .icon-btn,
 .btn {
   min-height: 42px;
@@ -224,6 +274,14 @@ h3 {
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+}
+
+.primary-actions.centered {
+  justify-content: center;
+}
+
+.check-score-button {
+  min-width: 220px;
 }
 
 .btn {
@@ -336,6 +394,13 @@ h3 {
   display: grid;
   gap: 12px;
   margin: 24px 0 0;
+}
+
+.meta-list-centered {
+  max-width: 760px;
+  margin-left: auto;
+  margin-right: auto;
+  text-align: left;
 }
 
 .meta-list.inline {
@@ -586,6 +651,32 @@ h3 {
 
 .check-row p { margin-bottom: 6px; }
 .check-row .suggestion { color: var(--muted); }
+
+.check-accordion .accordion-button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.check-accordion .accordion-button::after {
+  margin-left: 8px;
+}
+
+.check-item {
+  border-left: 4px solid var(--border);
+}
+
+.check-item.fail { border-left-color: var(--fail); }
+.check-item.warn { border-left-color: var(--warn); }
+.check-item.pass { border-left-color: var(--pass); }
+.check-item.info { border-left-color: var(--info); }
+
+.check-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 800;
+}
 
 .delta {
   text-align: right;

@@ -21,67 +21,49 @@
   </header>
 
   <main class="container tester-shell">
-    <section class="tester-hero" id="check-panel" data-token="{{.Mailbox.Token}}" data-public-url="{{.PublicURL}}">
-      <div class="test-panel">
-        <p class="eyebrow">Kostenloser Deliverability Check</p>
-        <h1>Teste den Spam-Score deiner E-Mail</h1>
-        <p class="lead">Sende deine Kampagne an diese Adresse und starte danach die Auswertung.</p>
+    <section class="tester-hero mailtester-flow" id="check-panel" data-token="{{.Mailbox.Token}}" data-public-url="{{.PublicURL}}">
+      <p class="eyebrow">Newsletter Spam Test</p>
+      <h1>Teste die Spam-Wirkung deiner E-Mail</h1>
+      <p class="lead">Sende zuerst deine E-Mail an die generierte Adresse. Danach prüft MailProbe Score, Authentifizierung, Inhalt und technische Signale.</p>
 
-        <div class="address-box">
-          <span class="address-label">Testadresse</span>
-          <code id="mail-address">{{.Mailbox.Address}}</code>
-          <button class="icon-btn copy-btn" type="button" onclick="copyAddress()" title="Adresse kopieren" aria-label="Adresse kopieren">Copy</button>
-        </div>
-
-        <div class="primary-actions">
-          <button id="check-btn" class="btn primary" type="button">Dann Score pruefen</button>
-          <button id="new-address-btn" class="btn secondary" type="button">Neue Testadresse</button>
-        </div>
-
-        <div id="check-loader" class="scan-loader d-none" aria-hidden="true">
-          <span></span><span></span><span></span>
-        </div>
-        <p id="check-status" class="check-status">Bereit fuer den ersten Check.</p>
+      <div class="flow-step">
+        <span class="step-number">1</span>
+        <strong>Sende deine E-Mail an:</strong>
       </div>
 
-      <aside class="side-panel">
-        <div class="step-list" aria-label="Testablauf">
-          <div class="step active">
-            <span>1</span>
-            <div>
-              <strong>Mail senden</strong>
-              <p>An die Testadresse oben.</p>
-            </div>
-          </div>
-          <div class="step">
-            <span>2</span>
-            <div>
-              <strong>Score pruefen</strong>
-              <p>MailProbe wartet live auf den Eingang.</p>
-            </div>
-          </div>
-          <div class="step">
-            <span>3</span>
-            <div>
-              <strong>Report oeffnen</strong>
-              <p>SPF, DKIM, DMARC, Inhalt und Links.</p>
-            </div>
-          </div>
+      <div class="address-box address-box-large">
+        <code id="mail-address">{{.Mailbox.Address}}</code>
+        <button class="icon-btn copy-btn" type="button" onclick="copyAddress()" title="Adresse kopieren" aria-label="Adresse kopieren">Copy</button>
+      </div>
+
+      <div class="flow-step">
+        <span class="step-number">2</span>
+        <strong>Wenn die E-Mail gesendet wurde:</strong>
+      </div>
+
+      <div class="primary-actions centered">
+        <button id="check-btn" class="btn primary check-score-button" type="button">Dann Score prüfen</button>
+        <button id="new-address-btn" class="btn secondary" type="button">Neue Testadresse</button>
+      </div>
+
+      <div id="check-loader" class="scan-loader d-none" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+      <p id="check-status" class="check-status">Bereit für den ersten Check.</p>
+
+      <dl class="meta-list meta-list-centered">
+        <div>
+          <dt>Ablaufdatum</dt>
+          <dd id="mail-expires-at" data-time="{{.Mailbox.ExpiresAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.Mailbox.ExpiresAt.Format "02.01.2006, 15:04:05 MST"}}</dd>
         </div>
-        <dl class="meta-list">
-          <div>
-            <dt>Gueltig bis</dt>
-            <dd id="mail-expires-at">{{.Mailbox.ExpiresAt.Format "2006-01-02 15:04:05 MST"}}</dd>
-          </div>
-          <div>
-            <dt>Direktlink</dt>
-            <dd><a id="mailbox-direct-link" href="{{.PublicURL}}/mailbox/{{.Mailbox.Token}}">{{.PublicURL}}/mailbox/{{.Mailbox.Token}}</a></dd>
-          </div>
-        </dl>
-      </aside>
+        <div>
+          <dt>Direktlink</dt>
+          <dd><a id="mailbox-direct-link" href="{{.PublicURL}}/mailbox/{{.Mailbox.Token}}">{{.PublicURL}}/mailbox/{{.Mailbox.Token}}</a></dd>
+        </div>
+      </dl>
     </section>
 
-    <section class="check-grid" aria-label="Pruefbereiche">
+    <section class="check-grid" aria-label="Prüfbereiche">
       <article>
         <strong>Authentifizierung</strong>
         <p>SPF, DKIM, DMARC und Alignment.</p>
@@ -96,7 +78,7 @@
       </article>
       <article>
         <strong>Export</strong>
-        <p>Raw, Header und JSON fuer Workflows.</p>
+        <p>Raw, Header und JSON für Workflows.</p>
       </article>
     </section>
   </main>

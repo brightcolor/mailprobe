@@ -163,7 +163,7 @@ Copy `.env.example` and adjust.
 
 Important variables:
 
-- `MAILPROBE_IMAGE` (default: `ghcr.io/brightcolor/mailprobe:latest`)
+- `MAILPROBE_IMAGE` (default: `ghcr.io/brightcolor/mailprobe:latest`; pin a version tag for production)
 - `PUBLIC_BASE_URL`
 - `SMTP_DOMAIN`
 - `HTTP_PORT`, `SMTP_PORT`
@@ -245,6 +245,32 @@ GitHub Actions workflows are included:
 Published image target:
 
 - `ghcr.io/brightcolor/mailprobe:<tag>`
+
+Image tag strategy:
+
+- `latest`: newest image from `main`
+- `main`: newest image from `main`, same moving channel as `latest`
+- `sha-<shortsha>`: immutable image for every pushed commit
+- `vX.Y.Z`: immutable release tag, created by `.github/workflows/release.yml`
+- `X.Y.Z`, `X.Y`, `X`: SemVer aliases created from `vX.Y.Z` tags
+
+Recommended production pin:
+
+```bash
+MAILPROBE_IMAGE=ghcr.io/brightcolor/mailprobe:v0.1.1
+docker compose pull
+docker compose up -d
+```
+
+Rollback to an older image:
+
+```bash
+MAILPROBE_IMAGE=ghcr.io/brightcolor/mailprobe:v0.1.0
+docker compose pull
+docker compose up -d
+```
+
+Use a `sha-<shortsha>` tag when you need an exact commit build instead of a named release.
 
 ## Resource profile (practical)
 

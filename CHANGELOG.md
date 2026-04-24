@@ -10,10 +10,12 @@ All notable changes to this project will be documented in this file.
 - Added a score-first web UI with a guided send-and-check flow, live mailbox status, prioritized report checks, and clearer export actions.
 - Added in-place test address generation without a full page reload.
 - Added sandboxed rendered HTML mail preview alongside raw HTML source.
+- Added SemVer Docker image tags, immutable commit SHA image tags, and a validated release-tag workflow for safer rollbacks.
 - Documented `TRUSTED_PROXY_CIDRS` in the environment template and README.
 
 ### Changed
 - Redesigned the home, mailbox, and report pages into a more focused email testing workflow with prominent test address, status panels, score summary, diagnostics, and raw data sections.
+- Adjusted the web UI closer to a mail-tester-style flow: central test address, clear check button, compact metadata, and accordion-style report checks.
 
 ### Fixed
 - Only trust `X-Forwarded-For` when the direct client IP matches `TRUSTED_PROXY_CIDRS`, preventing spoofed client IPs from bypassing web rate limits.

@@ -66,7 +66,8 @@ async function createMailbox() {
 function formatExpiry(value) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString(undefined, {
+  const locale = navigator.language || 'de-DE';
+  return d.toLocaleString(locale, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -86,7 +87,10 @@ function updateMailboxIdentity(data) {
 
   if (panel) panel.dataset.token = data.token;
   if (address) address.textContent = data.address;
-  if (expires) expires.textContent = formatExpiry(data.expires_at);
+  if (expires) {
+    expires.dataset.time = data.expires_at;
+    expires.textContent = formatExpiry(data.expires_at);
+  }
   if (link) {
     link.href = data.mailbox_url;
     link.textContent = data.mailbox_url;
@@ -128,11 +132,11 @@ function updateMailboxStatusText(data) {
   if (!statusText) return;
 
   if (data.latest_report_path) {
-    statusText.innerHTML = `Neue Mail analysiert (Score: ${data.latest_score}/10). <a href="${data.latest_report_path}">Report oeffnen</a>`;
+    statusText.innerHTML = `Neue Mail analysiert (Score: ${data.latest_score}/10). <a href="${data.latest_report_path}">Report öffnen</a>`;
     return;
   }
   if (data.latest_message_id) {
-    statusText.textContent = 'Mail empfangen, Analyse laeuft noch.';
+    statusText.textContent = 'Mail empfangen, Analyse läuft noch.';
     return;
   }
   statusText.textContent = 'Warte auf eingehende E-Mail ...';
@@ -198,7 +202,7 @@ function handleCheckStatusEvent(data) {
     return;
   }
   if (data.latest_message_id) {
-    setCheckUIState(true, 'Mail ist eingegangen. Analyse laeuft ...', 'warn');
+    setCheckUIState(true, 'Mail ist eingegangen. Analyse läuft ...', 'warn');
     return;
   }
   setCheckUIState(true, 'Noch keine E-Mail eingegangen. Ich warte weiter ...', 'warn');
@@ -209,7 +213,7 @@ function startCheckLoop() {
   const token = panel?.dataset?.token;
   if (!token) return;
 
-  setCheckUIState(true, 'Pruefe Eingang ...', 'warn');
+  setCheckUIState(true, 'Prüfe Eingang ...', 'warn');
   closeCheckStream();
 
   if (window.EventSource) {
@@ -221,7 +225,7 @@ function startCheckLoop() {
         const data = JSON.parse(evt.data);
         handleCheckStatusEvent(data);
       } catch (_) {
-        setCheckUIState(false, 'Ungueltige Event-Daten erhalten.', 'warn');
+        setCheckUIState(false, 'Ungültige Event-Daten erhalten.', 'warn');
       }
     });
 
@@ -271,6 +275,12 @@ function setupNewAddressButton() {
   const button = document.getElementById('new-address-btn');
   if (!button) return;
   button.addEventListener('click', createNewAddress);
+}
+
+function localizeStaticTimes() {
+  document.querySelectorAll('[data-time]').forEach((el) => {
+    el.textContent = formatExpiry(el.dataset.time);
+  });
 }
 
 function setupMailboxPolling() {
@@ -334,4 +344,5 @@ function startMailboxPollingFallback(token, onStatus) {
 
 setupCheckButton();
 setupNewAddressButton();
+localizeStaticTimes();
 setupMailboxPolling();

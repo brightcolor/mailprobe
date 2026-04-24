@@ -29,7 +29,7 @@
     </div>
     <div class="report-summary">
       <p class="eyebrow">Deliverability Report</p>
-      <h1>Analyse fuer {{.Mailbox.Address}}</h1>
+      <h1>Analyse für {{.Mailbox.Address}}</h1>
       <p class="lead">{{.Message.Subject}}</p>
       <div class="badges">
         <span class="badge pass">Pass {{index .Statuses "pass"}}</span>
@@ -67,20 +67,27 @@
     <div class="table-head">
       <div>
         <p class="eyebrow">Diagnose</p>
-        <h2>Einzelpruefungen</h2>
+        <h2>Einzelprüfungen</h2>
       </div>
     </div>
-    <div class="check-list">
+    <div class="accordion check-accordion" id="checksAccordion">
       {{range .Report.Checks}}
-      <article class="check-row {{.Status}}">
-        <div class="check-status-cell"><span class="pill {{.Status}}">{{.Status}}</span></div>
-        <div>
-          <h3>{{.Name}} <code>{{.ID}}</code></h3>
-          <p>{{.Summary}}</p>
-          {{if .Suggestion}}<p class="suggestion">{{.Suggestion}}</p>{{end}}
+      <div class="accordion-item check-item {{.Status}}">
+        <h3 class="accordion-header">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#check-{{.ID}}" aria-expanded="false" aria-controls="check-{{.ID}}">
+            <span class="pill {{.Status}}">{{.Status}}</span>
+            <span class="check-title">{{.Name}}</span>
+            <code>{{.ID}}</code>
+            <strong class="delta">{{printf "%+.1f" .ScoreDelta}}</strong>
+          </button>
+        </h3>
+        <div id="check-{{.ID}}" class="accordion-collapse collapse" data-bs-parent="#checksAccordion">
+          <div class="accordion-body">
+            <p>{{.Summary}}</p>
+            {{if .Suggestion}}<p class="suggestion">{{.Suggestion}}</p>{{end}}
+          </div>
         </div>
-        <strong class="delta">{{printf "%+.1f" .ScoreDelta}}</strong>
-      </article>
+      </div>
       {{end}}
     </div>
   </section>
@@ -88,7 +95,7 @@
   <section class="two-column">
     {{if .Report.Suggestions}}
     <article class="section-band">
-      <p class="eyebrow">Naechste Schritte</p>
+      <p class="eyebrow">Nächste Schritte</p>
       <h2>Verbesserungsvorschlaege</h2>
       <ul class="clean-list">
         {{range .Report.Suggestions}}<li>{{.}}</li>{{end}}

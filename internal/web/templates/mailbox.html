@@ -21,11 +21,11 @@
 
 <main class="container">
   <section class="mailbox-layout" id="check-panel" data-token="{{.Mailbox.Token}}" data-public-url="{{.PublicURL}}">
-    <div class="test-panel compact">
+    <div class="test-panel compact mailtester-flow">
       <p class="eyebrow">Aktive Testadresse</p>
       <h1>Warte auf deine E-Mail</h1>
       <div class="address-box">
-        <span class="address-label">Empfaenger</span>
+        <span class="address-label">Empfänger</span>
         <code id="mail-address">{{.Mailbox.Address}}</code>
         <button class="icon-btn copy-btn" type="button" onclick="copyAddress()" title="Adresse kopieren" aria-label="Adresse kopieren">Copy</button>
       </div>
@@ -34,8 +34,8 @@
       </div>
       <dl class="meta-list inline">
         <div>
-          <dt>Gueltig bis</dt>
-          <dd id="mail-expires-at">{{.Mailbox.ExpiresAt.Format "2006-01-02 15:04:05 MST"}}</dd>
+          <dt>Ablaufdatum</dt>
+          <dd id="mail-expires-at" data-time="{{.Mailbox.ExpiresAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.Mailbox.ExpiresAt.Format "02.01.2006, 15:04:05 MST"}}</dd>
         </div>
         <div>
           <dt>Direktlink</dt>
