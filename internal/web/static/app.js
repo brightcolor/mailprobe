@@ -4,7 +4,64 @@ let checkPollTimer = null;
 async function copyAddress() {
   const text = document.getElementById('mail-address')?.innerText?.trim();
   if (!text) return;
-  await navigator.clipboard.writeText(text);
+  const ok = await writeClipboardWithFallback(text);
+  if (ok) {
+    setTransientStatus('Adresse kopiert.', 'ok');
+    return;
+  }
+  setTransientStatus('Kopieren fehlgeschlagen. Bitte manuell markieren und kopieren.', 'warn');
+}
+
+async function writeClipboardWithFallback(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) {
+      // Fall back to legacy API below.
+    }
+  }
+
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'absolute';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+
+  let ok = false;
+  try {
+    ok = document.execCommand('copy');
+  } catch (_) {
+    ok = false;
+  } finally {
+    document.body.removeChild(ta);
+  }
+  return ok;
+}
+
+function setTransientStatus(message, tone) {
+  const checkStatus = document.getElementById('check-status');
+  if (checkStatus) {
+    checkStatus.textContent = message;
+    checkStatus.classList.remove('is-ok', 'is-warn');
+    if (tone === 'ok') checkStatus.classList.add('is-ok');
+    if (tone === 'warn') checkStatus.classList.add('is-warn');
+    return;
+  }
+
+  const mailboxStatus = document.getElementById('status-text');
+  if (mailboxStatus) {
+    mailboxStatus.textContent = message;
+    return;
+  }
+
+  const toast = document.createElement('div');
+  toast.className = `copy-toast ${tone === 'ok' ? 'is-ok' : 'is-warn'}`;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2200);
 }
 
 async function fetchMailboxStatus(token) {
