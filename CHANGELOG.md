@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Added tokenized JSON report export at `GET /api/reports/<mailbox-token>/<message-ref>` for automation and integrations.
+- Added JSON report links to mailbox and report pages.
+- Documented `TRUSTED_PROXY_CIDRS` in the environment template and README.
+
+### Fixed
+- Only trust `X-Forwarded-For` when the direct client IP matches `TRUSTED_PROXY_CIDRS`, preventing spoofed client IPs from bypassing web rate limits.
+- Decode folded and RFC 2047 encoded `Subject` headers before storing message metadata.
+
 ## [0.1.0] - 2026-04-22
 
 ### Added

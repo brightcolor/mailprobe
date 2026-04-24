@@ -35,3 +35,17 @@ func TestEnrichWithReceiverAuthHeadersAddsAuthBlocks(t *testing.T) {
 		}
 	}
 }
+
+func TestHeaderFieldUnfoldsAndDecodesSubject(t *testing.T) {
+	headers := strings.Join([]string{
+		"From: sender@example.org",
+		"Subject: =?UTF-8?Q?Hallo?=",
+		" =?UTF-8?Q?_Welt?=",
+		"To: probe@example.test",
+	}, "\r\n")
+
+	got := headerField(headers, "Subject")
+	if got != "Hallo Welt" {
+		t.Fatalf("expected decoded folded subject, got %q", got)
+	}
+}

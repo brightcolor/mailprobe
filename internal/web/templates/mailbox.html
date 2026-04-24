@@ -67,6 +67,7 @@
               {{if .Report}}<a href="/report/{{$.Mailbox.Token}}?msg={{msgref $.Mailbox.Token .Message.ID}}">Report</a>{{else}}in Analyse{{end}}
               | <a href="/raw/{{$.Mailbox.Token}}/{{msgref $.Mailbox.Token .Message.ID}}/headers" target="_blank">Header</a>
               | <a href="/raw/{{$.Mailbox.Token}}/{{msgref $.Mailbox.Token .Message.ID}}/source" target="_blank">Raw</a>
+              {{if .Report}} | <a href="/api/reports/{{$.Mailbox.Token}}/{{msgref $.Mailbox.Token .Message.ID}}" target="_blank">JSON</a>{{end}}
             </td>
           </tr>
           {{end}}

@@ -34,6 +34,7 @@ This project is intentionally built for small VPS setups (including ~1 GB RAM en
 - Multiple emails per mailbox
 - Mailbox TTL and automatic expiration
 - Raw source and raw headers view
+- JSON report endpoint for automation/integrations
 
 ### Analysis and scoring
 
@@ -170,6 +171,7 @@ Important variables:
 - `MAX_ACTIVE_MAILBOXES_GLOBAL`
 - `WEB_RATE_LIMIT_PER_MIN`
 - `WEB_BURST_PER_10_SEC`
+- `TRUSTED_PROXY_CIDRS` (only these proxy CIDRs may supply `X-Forwarded-For`)
 - `SMTP_RATE_LIMIT_PER_HOUR`
 - `SMTP_BURST_PER_MIN`
 - `ENABLE_RBL_CHECKS`, `RBL_PROVIDERS`
@@ -213,6 +215,10 @@ Health endpoints:
 - `GET /healthz`
 - `GET /readyz`
 - `GET /metrics` (Prometheus text format)
+
+Report API:
+
+- `GET /api/reports/<mailbox-token>/<message-ref>` returns mailbox metadata, message metadata, and the full analysis report as JSON.
 
 Useful commands:
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"os/signal"
@@ -218,9 +219,22 @@ func headerBlock(raw string) string {
 func headerField(headerBlock, key string) string {
 	lines := strings.Split(headerBlock, "\n")
 	prefix := strings.ToLower(key) + ":"
-	for _, l := range lines {
-		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(l)), prefix) {
-			return strings.TrimSpace(l[len(prefix):])
+	for i, l := range lines {
+		line := strings.TrimRight(l, "\r")
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(line)), prefix) {
+			value := strings.TrimSpace(line[len(prefix):])
+			for _, next := range lines[i+1:] {
+				next = strings.TrimRight(next, "\r")
+				if !strings.HasPrefix(next, " ") && !strings.HasPrefix(next, "\t") {
+					break
+				}
+				value += " " + strings.TrimSpace(next)
+			}
+			decoded, err := new(mime.WordDecoder).DecodeHeader(value)
+			if err == nil {
+				return strings.TrimSpace(decoded)
+			}
+			return strings.TrimSpace(value)
 		}
 	}
 	return ""

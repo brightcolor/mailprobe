@@ -1,6 +1,7 @@
 package web
 
 import (
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -61,5 +62,31 @@ func TestMessageBodyViewsMultipartAlternative(t *testing.T) {
 	}
 	if !strings.Contains(html, "<b>HTML</b>") {
 		t.Fatalf("expected html body, got %q", html)
+	}
+}
+
+func TestClientIPIgnoresForwardedForWithoutTrustedProxy(t *testing.T) {
+	srv := &Server{}
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "198.51.100.10:12345"
+	req.Header.Set("X-Forwarded-For", "203.0.113.99")
+
+	if got := srv.clientIP(req); got != "198.51.100.10" {
+		t.Fatalf("expected remote address without trusted proxy, got %q", got)
+	}
+}
+
+func TestClientIPUsesForwardedForFromTrustedProxy(t *testing.T) {
+	trustedProxy, err := parseTrustedProxyCIDRs([]string{"10.0.0.0/8"})
+	if err != nil {
+		t.Fatalf("parse trusted proxy cidr: %v", err)
+	}
+	srv := &Server{trustedProxy: trustedProxy}
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "10.1.2.3:12345"
+	req.Header.Set("X-Forwarded-For", "203.0.113.99, 10.1.2.3")
+
+	if got := srv.clientIP(req); got != "203.0.113.99" {
+		t.Fatalf("expected forwarded client ip, got %q", got)
 	}
 }

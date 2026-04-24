@@ -162,6 +162,41 @@ func TestMailboxStatusReturnsTokenizedReportPath(t *testing.T) {
 	}
 }
 
+func TestReportAPIReturnsJSONForTokenizedMessageRef(t *testing.T) {
+	restoreWD := chdirToRepoRoot(t)
+	defer restoreWD()
+
+	srv, _, mb, msg, _ := prepareWebTestFixture(t)
+	h := srv.Handler()
+	msgRef := messageReference(mb.Token, msg.ID)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/reports/"+mb.Token+"/"+msgRef, nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%q", rr.Code, rr.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json payload: %v", err)
+	}
+	message, ok := payload["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected message object in payload: %#v", payload)
+	}
+	if message["reference"] != msgRef || message["subject"] != "Demo" {
+		t.Fatalf("unexpected message metadata: %#v", message)
+	}
+	report, ok := payload["report"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected report object in payload: %#v", payload)
+	}
+	if report["score_label"] != "Good" {
+		t.Fatalf("unexpected report payload: %#v", report)
+	}
+}
+
 func prepareWebTestFixture(t *testing.T) (*Server, *store.Store, model.Mailbox, model.Message, model.AnalysisReport) {
 	t.Helper()
 

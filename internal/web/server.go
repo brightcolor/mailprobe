@@ -42,6 +42,7 @@ type Server struct {
 	burstLimiter *ratelimit.Limiter
 	metrics      *telemetry.Counters
 	staticFS     http.Handler
+	trustedProxy []*net.IPNet
 }
 
 var errActiveMailboxLimit = errors.New("active mailbox limit reached for ip")
@@ -85,6 +86,10 @@ func New(cfg config.Config, st *store.Store, logger *log.Logger, metrics *teleme
 	if err != nil {
 		return nil, err
 	}
+	trustedProxy, err := parseTrustedProxyCIDRs(cfg.TrustedProxyCIDRs)
+	if err != nil {
+		return nil, err
+	}
 	return &Server{
 		cfg:          cfg,
 		store:        st,
@@ -94,6 +99,7 @@ func New(cfg config.Config, st *store.Store, logger *log.Logger, metrics *teleme
 		burstLimiter: ratelimit.New(10*time.Second, cfg.WebBurstPer10Sec),
 		metrics:      metrics,
 		staticFS:     http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join("internal", "web", "static")))),
+		trustedProxy: trustedProxy,
 	}, nil
 }
 
@@ -106,6 +112,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/metrics", s.metricsPage)
 	mux.HandleFunc("/api/mailboxes", s.createMailbox)
 	mux.HandleFunc("/api/mailboxes/", s.mailboxAPI)
+	mux.HandleFunc("/api/reports/", s.reportAPI)
 	mux.HandleFunc("/mailbox/", s.mailboxPage)
 	mux.HandleFunc("/report/", s.reportPage)
 	mux.HandleFunc("/raw/", s.rawPage)
@@ -330,14 +337,7 @@ func (s *Server) reportPage(w http.ResponseWriter, r *http.Request) {
 
 	var selected *model.MessageWithReport
 	msgRefQuery := strings.TrimSpace(r.URL.Query().Get("msg"))
-	if msgRefQuery != "" {
-		for i := range msgs {
-			if messageReference(token, msgs[i].Message.ID) == msgRefQuery {
-				selected = &msgs[i]
-				break
-			}
-		}
-	}
+	selected = selectMessageWithReport(token, msgs, msgRefQuery)
 	if selected == nil {
 		for i := range msgs {
 			if msgs[i].Report != nil {
@@ -411,6 +411,7 @@ func (s *Server) rawPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	switch part {
 	case "headers":
 		_, _ = w.Write([]byte(msg.HeaderBlock))
@@ -419,6 +420,60 @@ func (s *Server) rawPage(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (s *Server) reportAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		jsonResp(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, "/api/reports/")
+	parts := strings.Split(rest, "/")
+	if len(parts) != 2 {
+		jsonResp(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	token := strings.TrimSpace(parts[0])
+	msgRef := strings.TrimSpace(parts[1])
+	if token == "" || msgRef == "" {
+		jsonResp(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+
+	mb, err := s.store.GetMailboxByToken(r.Context(), token)
+	if err != nil {
+		jsonResp(w, http.StatusNotFound, map[string]string{"error": "mailbox not found"})
+		return
+	}
+	msgs, err := s.store.ListMessagesWithReports(r.Context(), mb.ID, 500)
+	if err != nil {
+		jsonResp(w, http.StatusInternalServerError, map[string]string{"error": "db error"})
+		return
+	}
+	selected := selectMessageWithReport(token, msgs, msgRef)
+	if selected == nil || selected.Report == nil {
+		jsonResp(w, http.StatusNotFound, map[string]string{"error": "report not found"})
+		return
+	}
+
+	jsonResp(w, http.StatusOK, map[string]any{
+		"mailbox": map[string]any{
+			"token":      mb.Token,
+			"address":    mb.Address,
+			"expires_at": mb.ExpiresAt,
+		},
+		"message": map[string]any{
+			"reference":   msgRef,
+			"received_at": selected.Message.ReceivedAt,
+			"smtp_from":   selected.Message.SMTPFrom,
+			"rcpt_to":     selected.Message.RCPTTo,
+			"remote_ip":   selected.Message.RemoteIP,
+			"helo":        selected.Message.HELO,
+			"subject":     selected.Message.Subject,
+			"size_bytes":  selected.Message.SizeBytes,
+		},
+		"report": selected.Report,
+	})
 }
 
 func (s *Server) mailboxAPI(w http.ResponseWriter, r *http.Request) {
@@ -564,16 +619,77 @@ func randomToken(bytesLen int) (string, error) {
 }
 
 func (s *Server) clientIP(r *http.Request) string {
-	if xf := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]); xf != "" {
-		if ip := net.ParseIP(strings.TrimSpace(xf)); ip != nil {
+	remoteIP := remoteAddrIP(r.RemoteAddr)
+	if s.isTrustedProxy(remoteIP) {
+		if xf := firstForwardedIP(r.Header.Get("X-Forwarded-For")); xf != "" {
+			return xf
+		}
+	}
+	if remoteIP != "" {
+		return remoteIP
+	}
+	return r.RemoteAddr
+}
+
+func parseTrustedProxyCIDRs(values []string) ([]*net.IPNet, error) {
+	out := make([]*net.IPNet, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if ip := net.ParseIP(value); ip != nil {
+			bits := 32
+			if ip.To4() == nil {
+				bits = 128
+			}
+			_, cidr, _ := net.ParseCIDR(fmt.Sprintf("%s/%d", ip.String(), bits))
+			out = append(out, cidr)
+			continue
+		}
+		_, cidr, err := net.ParseCIDR(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid TRUSTED_PROXY_CIDRS entry %q: %w", value, err)
+		}
+		out = append(out, cidr)
+	}
+	return out, nil
+}
+
+func remoteAddrIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(remoteAddr))
+	if err == nil {
+		if ip := net.ParseIP(host); ip != nil {
+			return ip.String()
+		}
+		return host
+	}
+	if ip := net.ParseIP(strings.TrimSpace(remoteAddr)); ip != nil {
+		return ip.String()
+	}
+	return ""
+}
+
+func firstForwardedIP(header string) string {
+	for _, part := range strings.Split(header, ",") {
+		if ip := net.ParseIP(strings.TrimSpace(part)); ip != nil {
 			return ip.String()
 		}
 	}
-	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
-	if err == nil {
-		return host
+	return ""
+}
+
+func (s *Server) isTrustedProxy(ipText string) bool {
+	ip := net.ParseIP(strings.TrimSpace(ipText))
+	if ip == nil {
+		return false
 	}
-	return r.RemoteAddr
+	for _, cidr := range s.trustedProxy {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, data any) {
@@ -605,6 +721,19 @@ func sortChecks(checks []model.CheckResult) {
 func messageReference(mailboxToken string, messageID int64) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d", mailboxToken, messageID)))
 	return hex.EncodeToString(sum[:8])
+}
+
+func selectMessageWithReport(token string, msgs []model.MessageWithReport, msgRef string) *model.MessageWithReport {
+	msgRef = strings.TrimSpace(msgRef)
+	if msgRef == "" {
+		return nil
+	}
+	for i := range msgs {
+		if messageReference(token, msgs[i].Message.ID) == msgRef {
+			return &msgs[i]
+		}
+	}
+	return nil
 }
 
 func (s *Server) getOrCreateHomeMailbox(ctx context.Context, ip, preferredToken string, forceNew bool) (model.Mailbox, error) {
