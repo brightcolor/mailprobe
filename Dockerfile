@@ -1,4 +1,4 @@
-﻿# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.7
 
 FROM golang:1.23-alpine AS builder
 WORKDIR /src
@@ -6,6 +6,7 @@ RUN apk add --no-cache build-base
 COPY go.mod ./
 RUN go mod download
 COPY . .
+RUN go mod tidy
 RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/mailprobe ./cmd/mailprobe
 
 FROM alpine:3.21
