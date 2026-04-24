@@ -1,4 +1,4 @@
-﻿{{define "mailbox"}}
+{{define "mailbox"}}
 <!doctype html>
 <html lang="de">
 <head>
@@ -22,7 +22,7 @@
     <p class="hint">Direktlink: <a href="{{.PublicURL}}/mailbox/{{.Mailbox.Token}}">{{.PublicURL}}/mailbox/{{.Mailbox.Token}}</a></p>
   </section>
 
-  <section class="card" id="status-card" data-token="{{.Mailbox.Token}}">
+  <section class="card" id="status-card" data-token="{{.Mailbox.Token}}" data-latest-message-id="{{if .Messages}}{{(index .Messages 0).Message.ID}}{{else}}0{{end}}">
     <h2>Status</h2>
     <p id="status-text">Warte auf eingehende E-Mail ...</p>
   </section>
