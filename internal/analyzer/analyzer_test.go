@@ -1,7 +1,9 @@
 package analyzer
 
 import (
+	"encoding/json"
 	"net/mail"
+	"strings"
 	"testing"
 )
 
@@ -61,5 +63,37 @@ func TestNewsletterHeuristicsListUnsubscribe(t *testing.T) {
 	}
 	if checks[0].ID != "list_unsub" || checks[0].Status != "pass" {
 		t.Fatalf("expected list_unsub pass, got id=%s status=%s", checks[0].ID, checks[0].Status)
+	}
+}
+
+func TestTopRspamdSymbols(t *testing.T) {
+	raw := map[string]json.RawMessage{
+		"R_DKIM_REJECT": json.RawMessage(`{"score": 4.2, "description":"DKIM validation failed"}`),
+		"R_SPF_FAIL":    json.RawMessage(`{"score": 3.1, "description":"SPF failed"}`),
+		"NEUTRAL":       json.RawMessage(`{"score": 0.0, "description":"neutral"}`),
+	}
+
+	top := topRspamdSymbols(raw, 2)
+	if len(top) != 2 {
+		t.Fatalf("expected 2 top symbols, got %d", len(top))
+	}
+	if top[0].Name != "R_DKIM_REJECT" || top[1].Name != "R_SPF_FAIL" {
+		t.Fatalf("unexpected order: %#v", top)
+	}
+}
+
+func TestRspamdSuggestionFor(t *testing.T) {
+	symbols := []rspamdSymbol{
+		{Name: "R_DKIM_REJECT", Score: 4.1},
+		{Name: "R_SPF_FAIL", Score: 2.9},
+		{Name: "URL_PHISHING", Score: 2.4},
+	}
+
+	s := rspamdSuggestionFor(symbols, "reject")
+	if s == "" {
+		t.Fatal("expected non-empty suggestion")
+	}
+	if !(strings.Contains(s, "DKIM") || strings.Contains(s, "SPF") || strings.Contains(strings.ToLower(s), "links")) {
+		t.Fatalf("expected practical recommendation, got: %q", s)
 	}
 }

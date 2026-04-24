@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -716,10 +717,10 @@ func spamAssassinHeuristic(ctx context.Context, hostport, raw string) model.Chec
 }
 
 type rspamdCheckResult struct {
-	Score         float64               `json:"score"`
-	RequiredScore float64               `json:"required_score"`
-	Action        string                `json:"action"`
-	Symbols       map[string]any        `json:"symbols"`
+	Score         float64                    `json:"score"`
+	RequiredScore float64                    `json:"required_score"`
+	Action        string                     `json:"action"`
+	Symbols       map[string]json.RawMessage `json:"symbols"`
 }
 
 func rspamdHeuristic(ctx context.Context, endpointURL, password, raw string) model.CheckResult {
@@ -753,20 +754,135 @@ func rspamdHeuristic(ctx context.Context, endpointURL, password, raw string) mod
 	}
 
 	action := strings.ToLower(strings.TrimSpace(parsed.Action))
-	summary := fmt.Sprintf("Rspamd action=%s score=%.2f required=%.2f symbols=%d", emptyFallback(action, "unknown"), parsed.Score, parsed.RequiredScore, len(parsed.Symbols))
+	topSymbols := topRspamdSymbols(parsed.Symbols, 4)
+	topSummary := ""
+	if len(topSymbols) > 0 {
+		chunks := make([]string, 0, len(topSymbols))
+		for _, s := range topSymbols {
+			if s.Description != "" {
+				chunks = append(chunks, fmt.Sprintf("%s(+%.2f): %s", s.Name, s.Score, s.Description))
+			} else {
+				chunks = append(chunks, fmt.Sprintf("%s(+%.2f)", s.Name, s.Score))
+			}
+		}
+		topSummary = " top=[" + strings.Join(chunks, "; ") + "]"
+	}
+	summary := fmt.Sprintf("Rspamd action=%s score=%.2f required=%.2f symbols=%d%s", emptyFallback(action, "unknown"), parsed.Score, parsed.RequiredScore, len(parsed.Symbols), topSummary)
+	suggestion := rspamdSuggestionFor(topSymbols, action)
+
 	switch action {
 	case "reject", "soft reject":
-		return fail("rspamd", "Rspamd", -1.2, summary, "Review triggered symbols and sender/content reputation.")
+		return fail("rspamd", "Rspamd", -1.2, summary, suggestion)
 	case "add header", "rewrite subject", "greylist":
-		return warn("rspamd", "Rspamd", -0.6, summary, "Tune message content and auth alignment to reduce spam signals.")
+		return warn("rspamd", "Rspamd", -0.6, summary, suggestion)
 	case "no action":
 		return pass("rspamd", "Rspamd", 0.2, summary, "")
 	default:
 		if parsed.RequiredScore > 0 && parsed.Score >= parsed.RequiredScore {
-			return warn("rspamd", "Rspamd", -0.6, summary, "Score is above or equal to required threshold.")
+			return warn("rspamd", "Rspamd", -0.6, summary, suggestion)
 		}
 		return info("rspamd", "Rspamd", 0.0, summary, "")
 	}
+}
+
+type rspamdSymbol struct {
+	Name        string
+	Score       float64
+	Description string
+}
+
+func topRspamdSymbols(raw map[string]json.RawMessage, n int) []rspamdSymbol {
+	symbols := make([]rspamdSymbol, 0, len(raw))
+	for name, payload := range raw {
+		score, desc := parseRspamdSymbolPayload(payload)
+		if score <= 0 {
+			continue
+		}
+		symbols = append(symbols, rspamdSymbol{Name: name, Score: score, Description: desc})
+	}
+	sort.SliceStable(symbols, func(i, j int) bool {
+		if symbols[i].Score == symbols[j].Score {
+			return symbols[i].Name < symbols[j].Name
+		}
+		return symbols[i].Score > symbols[j].Score
+	})
+	if n > 0 && len(symbols) > n {
+		return symbols[:n]
+	}
+	return symbols
+}
+
+func parseRspamdSymbolPayload(payload json.RawMessage) (float64, string) {
+	var typed struct {
+		Score       float64 `json:"score"`
+		Description string  `json:"description"`
+	}
+	if err := json.Unmarshal(payload, &typed); err == nil {
+		return typed.Score, strings.TrimSpace(typed.Description)
+	}
+
+	var generic map[string]any
+	if err := json.Unmarshal(payload, &generic); err != nil {
+		return 0, ""
+	}
+	score := anyNumberToFloat(generic["score"])
+	desc := ""
+	if d, ok := generic["description"]; ok {
+		desc = strings.TrimSpace(fmt.Sprintf("%v", d))
+	}
+	return score, desc
+}
+
+func anyNumberToFloat(v any) float64 {
+	switch t := v.(type) {
+	case float64:
+		return t
+	case float32:
+		return float64(t)
+	case int:
+		return float64(t)
+	case int64:
+		return float64(t)
+	case json.Number:
+		f, _ := t.Float64()
+		return f
+	case string:
+		f, _ := strconv.ParseFloat(t, 64)
+		return f
+	default:
+		return 0
+	}
+}
+
+func rspamdSuggestionFor(symbols []rspamdSymbol, action string) string {
+	parts := make([]string, 0, 4)
+	if action == "reject" || action == "soft reject" {
+		parts = append(parts, "Message was rejected by Rspamd; fix the highest positive symbols first.")
+	}
+	for _, s := range symbols {
+		name := strings.ToUpper(s.Name)
+		switch {
+		case strings.Contains(name, "SPF"):
+			parts = append(parts, "Fix SPF for the envelope sender and align with visible From.")
+		case strings.Contains(name, "DKIM"):
+			parts = append(parts, "Ensure DKIM signatures validate for this sending stream.")
+		case strings.Contains(name, "DMARC"):
+			parts = append(parts, "Align DMARC with SPF or DKIM pass for the From domain.")
+		case strings.Contains(name, "URL"), strings.Contains(name, "PHISH"):
+			parts = append(parts, "Review links; remove suspicious redirects/shorteners and limit tracking parameters.")
+		case strings.Contains(name, "MIME"), strings.Contains(name, "HTML"):
+			parts = append(parts, "Simplify MIME/HTML structure and avoid hidden/deceptive markup.")
+		case strings.Contains(name, "RBL"), strings.Contains(name, "DNSBL"):
+			parts = append(parts, "Check sender IP reputation and remove DNSBL/RBL listings.")
+		}
+		if len(parts) >= 4 {
+			break
+		}
+	}
+	if len(parts) == 0 {
+		return "Inspect Rspamd symbol details and adjust auth, content, and link hygiene."
+	}
+	return strings.Join(dedupeSorted(parts), " ")
 }
 
 func domainFromDKIM(sig string) string {

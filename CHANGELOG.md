@@ -17,3 +17,4 @@ All notable changes to this project will be documented in this file.
 - Optional Rspamd integration via controller API (`/checkv2`) with report scoring.
 - Added `scripts/quickstart.sh` to install Docker/Compose (if missing) and deploy MailProbe in one command.
 - Quickstart now prompts for optional `rspamd` and `redis`, writes `.env` flags, and generates `docker-compose.override.yml` accordingly.
+- Rspamd analysis now surfaces top positive symbols and concrete remediation guidance in report checks.

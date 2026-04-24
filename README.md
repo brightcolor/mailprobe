@@ -61,6 +61,7 @@ This project is intentionally built for small VPS setups (including ~1 GB RAM en
 - Optional RBL checks (disabled by default)
 - Optional SpamAssassin integration (disabled by default)
 - Optional Rspamd integration (disabled by default)
+- Rspamd findings include top rejecting symbols and actionable recommendations in report output
 
 ## Non-goals
 
