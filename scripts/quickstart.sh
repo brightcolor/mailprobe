@@ -9,6 +9,8 @@ SMTP_PORT="${SMTP_PORT:-2525}"
 MAILPROBE_IMAGE="${MAILPROBE_IMAGE:-ghcr.io/brightcolor/mailprobe:latest}"
 SMTP_DOMAIN="${SMTP_DOMAIN:-$(hostname -f 2>/dev/null || hostname)}"
 PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-}"
+ENABLE_RSPAMD="${ENABLE_RSPAMD:-}"
+ENABLE_REDIS="${ENABLE_REDIS:-}"
 
 have_cmd() {
   command -v "$1" >/dev/null 2>&1
@@ -16,6 +18,31 @@ have_cmd() {
 
 log() {
   printf '[quickstart] %s\n' "$*"
+}
+
+prompt_yes_no() {
+  local question="$1"
+  local default_value="${2:-n}"
+  local answer
+
+  if [[ ! -t 0 ]]; then
+    if [[ "$default_value" == "y" ]]; then
+      echo "true"
+    else
+      echo "false"
+    fi
+    return
+  fi
+
+  while true; do
+    read -r -p "$question [$default_value]: " answer
+    answer="${answer:-$default_value}"
+    case "${answer,,}" in
+      y|yes) echo "true"; return ;;
+      n|no) echo "false"; return ;;
+      *) echo "Please answer y or n." ;;
+    esac
+  done
 }
 
 if [[ "$(uname -s)" != "Linux" ]]; then
@@ -136,6 +163,59 @@ setup_env_file() {
   set_env_key "SMTP_DOMAIN" "$SMTP_DOMAIN"
   set_env_key "PUBLIC_BASE_URL" "$PUBLIC_BASE_URL"
   set_env_key "MAILPROBE_IMAGE" "$MAILPROBE_IMAGE"
+  set_env_key "ENABLE_RSPAMD" "$ENABLE_RSPAMD"
+  set_env_key "ENABLE_REDIS" "$ENABLE_REDIS"
+  set_env_key "REDIS_ADDR" "redis:6379"
+}
+
+setup_optional_services_override() {
+  cd "$INSTALL_DIR"
+  local override_file="docker-compose.override.yml"
+
+  if [[ "$ENABLE_RSPAMD" != "true" && "$ENABLE_REDIS" != "true" ]]; then
+    rm -f "$override_file"
+    return
+  fi
+
+  cat > "$override_file" <<'YAML'
+services:
+YAML
+
+  if [[ "$ENABLE_RSPAMD" == "true" ]]; then
+    cat >> "$override_file" <<'YAML'
+  rspamd:
+    image: rspamd/rspamd:latest
+    container_name: mailprobe-rspamd
+    restart: unless-stopped
+    expose:
+      - "11334"
+    mem_limit: 256m
+YAML
+  fi
+
+  if [[ "$ENABLE_REDIS" == "true" ]]; then
+    cat >> "$override_file" <<'YAML'
+  redis:
+    image: redis:7-alpine
+    container_name: mailprobe-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
+    expose:
+      - "6379"
+    volumes:
+      - mailprobe_redis_data:/data
+    mem_limit: 128m
+YAML
+  fi
+
+  if [[ "$ENABLE_REDIS" == "true" ]]; then
+    cat >> "$override_file" <<'YAML'
+
+volumes:
+  mailprobe_redis_data:
+    driver: local
+YAML
+  fi
 }
 
 docker_cmd() {
@@ -156,12 +236,20 @@ start_stack() {
 }
 
 main() {
+  if [[ -z "$ENABLE_RSPAMD" ]]; then
+    ENABLE_RSPAMD="$(prompt_yes_no "Enable optional Rspamd service?" "n")"
+  fi
+  if [[ -z "$ENABLE_REDIS" ]]; then
+    ENABLE_REDIS="$(prompt_yes_no "Enable optional Redis service?" "n")"
+  fi
+
   install_base_packages
   install_docker_if_needed
   prepare_docker_service
   install_compose_if_needed
   ensure_repo
   setup_env_file
+  setup_optional_services_override
   start_stack
 
   cat <<EOF
@@ -171,12 +259,18 @@ MailProbe setup complete.
 Install path: $INSTALL_DIR
 Web URL:      $PUBLIC_BASE_URL
 SMTP target:  <token>@$SMTP_DOMAIN (mapped to host port $SMTP_PORT)
+Rspamd:       $ENABLE_RSPAMD
+Redis:        $ENABLE_REDIS
 
 Next steps:
 1. Point DNS A/MX records to this server.
 2. Ensure inbound SMTP traffic reaches host port $SMTP_PORT (or map host :25 to container :2525).
 3. Open the Web URL and generate a test mailbox.
 EOF
+
+  if [[ "$ENABLE_REDIS" == "true" ]]; then
+    echo "Note: Redis is optional and currently not used by the core MailProbe code path."
+  fi
 }
 
 main "$@"

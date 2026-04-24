@@ -100,6 +100,9 @@ Fully automatic (installs Docker + Docker Compose if missing, no SSL/reverse-pro
 bash <(curl -fsSL https://raw.githubusercontent.com/brightcolor/mailprobe/main/scripts/quickstart.sh)
 ```
 
+The installer asks whether optional `rspamd` and `redis` services should be enabled.
+Based on your choice it generates `docker-compose.override.yml` (instead of editing comments in-place), and updates `.env` flags.
+
 Optional environment overrides for the script:
 
 ```bash
@@ -108,6 +111,8 @@ HTTP_PORT=8080 \
 SMTP_PORT=2525 \
 SMTP_DOMAIN=mx-test.example.org \
 PUBLIC_BASE_URL=http://your-server-ip:8080 \
+ENABLE_RSPAMD=false \
+ENABLE_REDIS=false \
 bash <(curl -fsSL https://raw.githubusercontent.com/brightcolor/mailprobe/main/scripts/quickstart.sh)
 ```
 
