@@ -79,7 +79,7 @@ func (e *Engine) Analyze(ctx context.Context, in Input) model.AnalysisReport {
 	fromDomain, _ := headerFromDomain(headers.Get("From"))
 	envelopeDomain := domainPart(in.Message.SMTPFrom)
 	returnPathDomain := domainPart(headers.Get("Return-Path"))
-	authResults := strings.ToLower(strings.Join(headers.Values("Authentication-Results"), " ; "))
+	authResults := strings.ToLower(strings.Join(headerValues(headers, "Authentication-Results"), " ; "))
 
 	spfResult := parseAuthResult(authResults, "spf")
 	dkimResult := parseAuthResult(authResults, "dkim")
@@ -186,7 +186,7 @@ func (e *Engine) Analyze(ctx context.Context, in Input) model.AnalysisReport {
 		report.Checks = append(report.Checks, pass("return_path", "Return-Path", 0.1, "Return-Path ist vorhanden.", ""))
 	}
 
-	receivedLines := headers.Values("Received")
+	receivedLines := headerValues(headers, "Received")
 	if len(receivedLines) == 0 {
 		report.Checks = append(report.Checks, fail("received_chain", "Received-Header-Kette", -1.2, "Keine Received-Header vorhanden.", "Transportpfad muss Received-Header enthalten."))
 	} else {
@@ -299,6 +299,17 @@ func parseAuthResult(s, key string) string {
 		return ""
 	}
 	return strings.ToLower(m[1])
+}
+
+func headerValues(h mail.Header, key string) []string {
+	k := textproto.CanonicalMIMEHeaderKey(key)
+	v, ok := h[k]
+	if !ok {
+		return nil
+	}
+	out := make([]string, len(v))
+	copy(out, v)
+	return out
 }
 
 func headerFromDomain(raw string) (domain, addr string) {
