@@ -178,7 +178,7 @@ Important variables:
 - `TRUSTED_PROXY_CIDRS` (only these proxy CIDRs may supply `X-Forwarded-For`)
 - `SMTP_RATE_LIMIT_PER_HOUR`
 - `SMTP_BURST_PER_MIN`
-- `ENABLE_RBL_CHECKS`, `RBL_PROVIDERS`
+- `ENABLE_RBL_CHECKS`, `RBL_PROVIDERS` (default: `zen.spamhaus.org,bl.spamcop.net,b.barracudacentral.org,psbl.surriel.com`)
 - `ENABLE_SPAMASSASSIN`, `SPAMASSASSIN_HOSTPORT`
 - `ENABLE_RSPAMD`, `RSPAMD_URL`, `RSPAMD_PASSWORD`
 - `ALERT_WEBHOOK_URL` (optional outbound webhook for operational alerts)

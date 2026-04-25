@@ -57,7 +57,7 @@ func Load() (Config, error) {
 		SMTPRateLimitPerHour: getEnvInt("SMTP_RATE_LIMIT_PER_HOUR", 200),
 		SMTPBurstPerMin:      getEnvInt("SMTP_BURST_PER_MIN", 40),
 		EnableRBLChecks:      getEnvBool("ENABLE_RBL_CHECKS", false),
-		RBLProviders:         splitCSV(getEnv("RBL_PROVIDERS", "zen.spamhaus.org,bl.spamcop.net")),
+		RBLProviders:         splitCSV(getEnv("RBL_PROVIDERS", "zen.spamhaus.org,bl.spamcop.net,b.barracudacentral.org,psbl.surriel.com")),
 		EnableSpamAssassin:   getEnvBool("ENABLE_SPAMASSASSIN", false),
 		SpamAssassinHostPort: getEnv("SPAMASSASSIN_HOSTPORT", "spamd:783"),
 		EnableRspamd:         getEnvBool("ENABLE_RSPAMD", false),
