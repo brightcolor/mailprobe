@@ -19,84 +19,128 @@
   </div>
 </header>
 
-<main class="container">
-  <section class="report-hero">
-    <div class="score-ring" style="--score: {{printf "%.1f" .Report.Score}};">
-      <div class="score-ring-inner">
-        <div class="score">{{printf "%.1f" .Report.Score}}<span>/10</span></div>
-        <p class="score-label">{{.Report.ScoreLabel}}</p>
+<main class="container report-container">
+  <section class="result-hero status-{{if ge .Report.Score 9.0}}pass{{else if ge .Report.Score 7.5}}warn{{else if ge .Report.Score 5.5}}warn{{else}}fail{{end}}">
+    <div class="score-orbit" style="--score: {{scorePercent .Report.Score}}%;">
+      <div class="score-orbit-inner">
+        <strong>{{printf "%.1f" .Report.Score}}</strong>
+        <span>/10</span>
       </div>
     </div>
-    <div class="report-summary">
+    <div class="result-hero-copy">
       <p class="eyebrow">Deliverability Report</p>
-      <h1>Analyse für {{.Mailbox.Address}}</h1>
-      <p class="lead">{{.Message.Subject}}</p>
+      <h1>{{.HeroTitle}}</h1>
+      <p class="lead">{{.HeroSubtitle}}</p>
       <div class="badges">
-        <span class="badge pass">Pass {{index .Statuses "pass"}}</span>
-        <span class="badge warn">Warn {{index .Statuses "warn"}}</span>
-        <span class="badge fail">Fail {{index .Statuses "fail"}}</span>
-        <span class="badge info">Info {{index .Statuses "info"}}</span>
+        <span class="badge pass">{{statusIcon "pass"}} {{index .Statuses "pass"}} bestanden</span>
+        <span class="badge warn">{{statusIcon "warn"}} {{index .Statuses "warn"}} Warnungen</span>
+        <span class="badge fail">{{statusIcon "fail"}} {{index .Statuses "fail"}} Fehler</span>
+        <span class="badge info">{{statusIcon "info"}} {{index .Statuses "info"}} Infos</span>
       </div>
       <div class="primary-actions">
-        <a class="btn primary" href="/mailbox/{{.Mailbox.Token}}">Zur Mailbox</a>
+        <a class="btn primary" href="/mailbox/{{.Mailbox.Token}}">Mailbox</a>
         <a class="btn secondary" href="/api/reports/{{.Mailbox.Token}}/{{msgref .Mailbox.Token .Message.ID}}" target="_blank">JSON Export</a>
       </div>
     </div>
   </section>
 
-  <section class="diagnostic-grid">
+  <section class="message-facts">
     <article>
-      <span class="pill fail">fail</span>
-      <strong>{{index .Statuses "fail"}} kritische Punkte</strong>
+      <span>Betreff</span>
+      <strong>{{if .Message.Subject}}{{.Message.Subject}}{{else}}Kein Betreff{{end}}</strong>
     </article>
     <article>
-      <span class="pill warn">warn</span>
-      <strong>{{index .Statuses "warn"}} Warnungen</strong>
+      <span>Empfangen</span>
+      <strong data-time="{{.Message.ReceivedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.Message.ReceivedAt.Format "2006-01-02 15:04:05 MST"}}</strong>
     </article>
     <article>
-      <span class="pill pass">pass</span>
-      <strong>{{index .Statuses "pass"}} bestandene Checks</strong>
+      <span>Envelope-From</span>
+      <strong>{{if .Message.SMTPFrom}}{{.Message.SMTPFrom}}{{else}}leer{{end}}</strong>
     </article>
     <article>
-      <span class="pill info">info</span>
-      <strong>{{index .Statuses "info"}} Hinweise</strong>
+      <span>Quelle</span>
+      <strong>{{.Message.RemoteIP}} / {{.Message.HELO}}</strong>
     </article>
   </section>
 
-  <section class="section-band">
+  {{range .CheckGroups}}
+  {{$groupID := safeID .Name}}
+  <section class="section-band check-group">
     <div class="table-head">
       <div>
-        <p class="eyebrow">Diagnose</p>
-        <h2>Einzelprüfungen</h2>
+        <p class="eyebrow">{{.Name}}</p>
+        <h2>{{.Name}}</h2>
+        <p class="hint">{{.Hint}}</p>
       </div>
     </div>
-    <div class="accordion check-accordion" id="checksAccordion">
-      {{range .Report.Checks}}
+
+    <div class="accordion check-accordion" id="checks-{{$groupID}}">
+      {{range .Checks}}
       <div class="accordion-item check-item {{.Status}}">
         <h3 class="accordion-header">
-          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#check-{{.ID}}" aria-expanded="false" aria-controls="check-{{.ID}}">
-            <span class="pill {{.Status}}">{{.Status}}</span>
-            <span class="check-title">{{.Name}}</span>
-            <code>{{.ID}}</code>
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#check-{{safeID .ID}}" aria-expanded="false" aria-controls="check-{{safeID .ID}}">
+            <span class="status-mark {{.Status}}">{{statusIcon .Status}}</span>
+            <span class="check-main">
+              <strong>{{.Name}}</strong>
+              <small>{{.Summary}}</small>
+            </span>
+            <span class="pill {{.Status}}">{{statusLabel .Status}}</span>
             <strong class="delta">{{printf "%+.1f" .ScoreDelta}}</strong>
           </button>
         </h3>
-        <div id="check-{{.ID}}" class="accordion-collapse collapse" data-bs-parent="#checksAccordion">
-          <div class="accordion-body">
-            <p>{{.Summary}}</p>
-            {{if .Suggestion}}<p class="suggestion">{{.Suggestion}}</p>{{end}}
+        <div id="check-{{safeID .ID}}" class="accordion-collapse collapse" data-bs-parent="#checks-{{$groupID}}">
+          <div class="accordion-body check-body">
+            <div class="check-section">
+              <h4>Kurzbewertung</h4>
+              <p>{{.Summary}}</p>
+            </div>
+
+            {{if .TechnicalDetails}}
+            <div class="check-section">
+              <div class="section-title-row">
+                <h4>Technische Details</h4>
+                <button class="mini-copy" type="button" data-copy="{{detailsText .TechnicalDetails}}">Kopieren</button>
+              </div>
+              <dl class="technical-details">
+                {{range $key, $value := .TechnicalDetails}}
+                <div>
+                  <dt>{{$key}}</dt>
+                  <dd><code>{{$value}}</code></dd>
+                </div>
+                {{end}}
+              </dl>
+            </div>
+            {{end}}
+
+            {{if .Explanation}}
+            <div class="check-section">
+              <h4>Erklaerung</h4>
+              <p>{{.Explanation}}</p>
+            </div>
+            {{end}}
+
+            {{if .Recommendation}}
+            <div class="check-section solution-box">
+              <div class="section-title-row">
+                <h4>Konkrete Loesung</h4>
+                <button class="mini-copy" type="button" data-copy="{{.Recommendation}}">Kopieren</button>
+              </div>
+              <p>{{.Recommendation}}</p>
+            </div>
+            {{end}}
           </div>
         </div>
       </div>
       {{end}}
     </div>
   </section>
+  {{end}}
 
   <section class="two-column">
     {{if .Report.Suggestions}}
     <article class="section-band">
-      <p class="eyebrow">Nächste Schritte</p>
-      <h2>Verbesserungsvorschlaege</h2>
+      <p class="eyebrow">Naechste Schritte</p>
+      <h2>Priorisierte Empfehlungen</h2>
       <ul class="clean-list">
         {{range .Report.Suggestions}}<li>{{.}}</li>{{end}}
       </ul>
@@ -114,11 +158,12 @@
     {{end}}
   </section>
 
-  <section class="section-band">
+  <section class="section-band raw-data-band">
     <div class="table-head">
       <div>
-        <p class="eyebrow">Inhalt</p>
-        <h2>Mail Views & Raw Data</h2>
+        <p class="eyebrow">Rohdaten</p>
+        <h2>Quelltext, Header und Mail-Inhalt</h2>
+        <p class="hint">Lange technische Inhalte bleiben einklappbar und lassen sich direkt kopieren.</p>
       </div>
       <nav class="row-actions" aria-label="Downloads">
         <a href="/raw/{{.Mailbox.Token}}/{{msgref .Mailbox.Token .Message.ID}}/headers" target="_blank">Header</a>
@@ -129,58 +174,48 @@
     <div class="accordion" id="rawAccordion">
       <div class="accordion-item">
         <h3 class="accordion-header">
-          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#plainTextView" aria-expanded="false" aria-controls="plainTextView">
-            Plaintext View
-          </button>
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#plainTextView" aria-expanded="false" aria-controls="plainTextView">Plaintext View</button>
         </h3>
         <div id="plainTextView" class="accordion-collapse collapse" data-bs-parent="#rawAccordion">
           <div class="accordion-body">
-            {{if .PlainTextBody}}<pre class="raw-block">{{.PlainTextBody}}</pre>{{else}}<p class="hint">No plaintext body found.</p>{{end}}
+            {{if .PlainTextBody}}<button class="mini-copy" type="button" data-copy="{{.PlainTextBody}}">Kopieren</button><pre class="raw-block">{{.PlainTextBody}}</pre>{{else}}<p class="hint">Kein Plaintext-Body gefunden.</p>{{end}}
           </div>
         </div>
       </div>
       <div class="accordion-item">
         <h3 class="accordion-header">
-          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#htmlSourceView" aria-expanded="false" aria-controls="htmlSourceView">
-            HTML Preview
-          </button>
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#htmlSourceView" aria-expanded="false" aria-controls="htmlSourceView">HTML Preview</button>
         </h3>
         <div id="htmlSourceView" class="accordion-collapse collapse" data-bs-parent="#rawAccordion">
           <div class="accordion-body">
-            {{if .HTMLPreviewBody}}<iframe class="html-preview" sandbox srcdoc="{{.HTMLPreviewBody}}" title="HTML Mail Preview"></iframe>{{else}}<p class="hint">No HTML body found.</p>{{end}}
+            {{if .HTMLPreviewBody}}<iframe class="html-preview" sandbox srcdoc="{{.HTMLPreviewBody}}" title="HTML Mail Preview"></iframe>{{else}}<p class="hint">Kein HTML-Body gefunden.</p>{{end}}
           </div>
         </div>
       </div>
       <div class="accordion-item">
         <h3 class="accordion-header">
-          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#htmlRawView" aria-expanded="false" aria-controls="htmlRawView">
-            HTML Source View
-          </button>
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#htmlRawView" aria-expanded="false" aria-controls="htmlRawView">HTML Source View</button>
         </h3>
         <div id="htmlRawView" class="accordion-collapse collapse" data-bs-parent="#rawAccordion">
           <div class="accordion-body">
-            {{if .HTMLSourceBody}}<pre class="raw-block">{{.HTMLSourceBody}}</pre>{{else}}<p class="hint">No HTML body found.</p>{{end}}
+            {{if .HTMLSourceBody}}<button class="mini-copy" type="button" data-copy="{{.HTMLSourceBody}}">Kopieren</button><pre class="raw-block">{{.HTMLSourceBody}}</pre>{{else}}<p class="hint">Kein HTML-Body gefunden.</p>{{end}}
           </div>
         </div>
       </div>
       <div class="accordion-item">
         <h3 class="accordion-header">
-          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#rawHeaders" aria-expanded="false" aria-controls="rawHeaders">
-            Header Block
-          </button>
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#rawHeaders" aria-expanded="false" aria-controls="rawHeaders">Header Block</button>
         </h3>
         <div id="rawHeaders" class="accordion-collapse collapse" data-bs-parent="#rawAccordion">
-          <div class="accordion-body"><pre class="raw-block">{{.Message.HeaderBlock}}</pre></div>
+          <div class="accordion-body"><button class="mini-copy" type="button" data-copy="{{.Message.HeaderBlock}}">Kopieren</button><pre class="raw-block">{{.Message.HeaderBlock}}</pre></div>
         </div>
       </div>
       <div class="accordion-item">
         <h3 class="accordion-header">
-          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#rawSource" aria-expanded="false" aria-controls="rawSource">
-            Full Raw Message
-          </button>
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#rawSource" aria-expanded="false" aria-controls="rawSource">Full Raw Message</button>
         </h3>
         <div id="rawSource" class="accordion-collapse collapse" data-bs-parent="#rawAccordion">
-          <div class="accordion-body"><pre class="raw-block">{{.Message.RawSource}}</pre></div>
+          <div class="accordion-body"><button class="mini-copy" type="button" data-copy="{{.Message.RawSource}}">Kopieren</button><pre class="raw-block">{{.Message.RawSource}}</pre></div>
         </div>
       </div>
     </div>
@@ -198,6 +233,7 @@
 </main>
 
 <script src="/static/vendor/bootstrap.bundle.min.js"></script>
+<script src="/static/app.js"></script>
 </body>
 </html>
 {{end}}

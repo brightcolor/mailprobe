@@ -1,8 +1,8 @@
 package analyzer
 
 import (
-	"bytes"
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -11,8 +11,8 @@ import (
 	"mime"
 	"mime/multipart"
 	"net"
-	"net/mail"
 	"net/http"
+	"net/mail"
 	"net/textproto"
 	"net/url"
 	"regexp"
@@ -60,13 +60,24 @@ func (e *Engine) Analyze(ctx context.Context, in Input) model.AnalysisReport {
 
 	parsed, parseErr := mail.ReadMessage(strings.NewReader(in.Message.RawSource))
 	if parseErr != nil {
-		report.Checks = append(report.Checks, fail("mime_parse", "MIME/Message Parsing", -2.0, "Rohmail konnte nicht korrekt geparst werden.", "Sende eine RFC-konforme MIME-Mail und prüfe den Mailer."))
+		parseCheck := fail("mime_parse", "MIME/Message Parsing", -2.0, "Rohmail konnte nicht korrekt geparst werden.", "Sende eine RFC-konforme MIME-Mail und pruefe den Mailer.")
+		parseCheck.Category = "Header und Rohdaten"
+		parseCheck.Severity = "high"
+		parseCheck.TechnicalDetails = map[string]string{
+			"remote_ip":   emptyFallback(in.Message.RemoteIP, "unknown"),
+			"helo_ehlo":   emptyFallback(in.Message.HELO, "unknown"),
+			"raw_bytes":   strconv.Itoa(len(in.Message.RawSource)),
+			"parse_error": parseErr.Error(),
+		}
+		parseCheck.Explanation = "Eine RFC-konforme Message-Struktur ist Voraussetzung fuer alle weiteren Authentifizierungs-, Header- und Inhaltspruefungen. Kaputte Rohmails werden von Providern schlechter bewertet oder direkt abgelehnt."
+		parseCheck.Recommendation = "Versandsoftware oder MTA so konfigurieren, dass Header und Body strikt RFC-konform erzeugt werden: gueltige Header-Zeilen, leere Zeile vor Body, korrekte CRLF-Zeilenenden und saubere MIME-Boundaries."
+		report.Checks = append(report.Checks, parseCheck)
 		report.Warnings = append(report.Warnings, parseErr.Error())
+		report.Score += parseCheck.ScoreDelta
 		report.Score = clampScore(report.Score)
 		assignLabel(&report)
 		return report
 	}
-
 	headers := parsed.Header
 	for k, v := range headers {
 		report.RawHeaders[k] = append([]string(nil), v...)
@@ -80,20 +91,20 @@ func (e *Engine) Analyze(ctx context.Context, in Input) model.AnalysisReport {
 	fromDomain, _ := headerFromDomain(headers.Get("From"))
 	envelopeDomain := domainPart(in.Message.SMTPFrom)
 	returnPathDomain := domainPart(headers.Get("Return-Path"))
-	authResults := strings.ToLower(strings.Join(headerValues(headers, "Authentication-Results"), " ; "))
+	authHeaderValues := headerValues(headers, "Authentication-Results")
+	authResults := strings.ToLower(strings.Join(authHeaderValues, " ; "))
 
 	spfResult := parseAuthResult(authResults, "spf")
 	dkimResult := parseAuthResult(authResults, "dkim")
 	dmarcResult := parseAuthResult(authResults, "dmarc")
 
 	// SPF
-	hasSPFRecord := false
+	spfRecords := make([]string, 0)
 	if envelopeDomain != "" {
 		recs, _ := net.DefaultResolver.LookupTXT(ctx, envelopeDomain)
 		for _, rec := range recs {
 			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(rec)), "v=spf1") {
-				hasSPFRecord = true
-				break
+				spfRecords = append(spfRecords, strings.TrimSpace(rec))
 			}
 		}
 	}
@@ -103,7 +114,7 @@ func (e *Engine) Analyze(ctx context.Context, in Input) model.AnalysisReport {
 	case "fail", "softfail":
 		report.Checks = append(report.Checks, fail("spf", "SPF", -1.4, fmt.Sprintf("SPF meldet %s.", spfResult), "Envelope-From-Domain und SPF-Record korrigieren."))
 	default:
-		if hasSPFRecord {
+		if len(spfRecords) > 0 {
 			report.Checks = append(report.Checks, info("spf", "SPF", 0.0, "SPF-Record vorhanden, kein eindeutiges SPF-Ergebnis im Header.", ""))
 		} else {
 			report.Checks = append(report.Checks, warn("spf", "SPF", -0.8, "Kein SPF-Record erkannt oder Ergebnis fehlt.", "TXT-Record mit v=spf1 auf der Envelope-From-Domain setzen."))
@@ -126,16 +137,15 @@ func (e *Engine) Analyze(ctx context.Context, in Input) model.AnalysisReport {
 	}
 
 	// DMARC
-	hasDMARC := false
+	dmarcRecords := make([]string, 0)
 	dmarcPolicy := ""
 	if fromDomain != "" {
 		dmarcTXT, _ := net.DefaultResolver.LookupTXT(ctx, "_dmarc."+fromDomain)
 		for _, rec := range dmarcTXT {
 			lr := strings.ToLower(rec)
 			if strings.HasPrefix(lr, "v=dmarc1") {
-				hasDMARC = true
+				dmarcRecords = append(dmarcRecords, strings.TrimSpace(rec))
 				dmarcPolicy = extractTagValue(lr, "p")
-				break
 			}
 		}
 	}
@@ -145,7 +155,7 @@ func (e *Engine) Analyze(ctx context.Context, in Input) model.AnalysisReport {
 
 	if dmarcResult == "pass" {
 		report.Checks = append(report.Checks, pass("dmarc", "DMARC", 0.4, "DMARC laut Authentication-Results bestanden.", ""))
-	} else if hasDMARC {
+	} else if len(dmarcRecords) > 0 {
 		if alignedSPF || alignedDKIM {
 			report.Checks = append(report.Checks, warn("dmarc", "DMARC", -0.3, fmt.Sprintf("DMARC-Record vorhanden (p=%s), Alignment teilweise plausibel, aber kein eindeutiges pass im Header.", emptyFallback(dmarcPolicy, "none")), "DMARC-Alignment und Reporting prüfen."))
 		} else {
@@ -155,8 +165,15 @@ func (e *Engine) Analyze(ctx context.Context, in Input) model.AnalysisReport {
 		report.Checks = append(report.Checks, fail("dmarc", "DMARC", -1.2, "Kein DMARC-Record für die From-Domain gefunden.", "_dmarc.<domain> TXT mit v=DMARC1 veröffentlichen."))
 	}
 
+	primaryDomain := firstNonEmpty(fromDomain, envelopeDomain)
+	report.Checks = append(report.Checks, mxRecordCheck(ctx, primaryDomain))
+	report.Checks = append(report.Checks, addressRecordCheck(ctx, primaryDomain))
+	report.Checks = append(report.Checks, spfAlignmentCheck(fromDomain, envelopeDomain, spfResult, alignedSPF))
+	report.Checks = append(report.Checks, dkimAlignmentCheck(fromDomain, dkimDomain, dkimResult, alignedDKIM))
+	report.Checks = append(report.Checks, dmarcAlignmentCheck(fromDomain, spfResult, dkimResult, alignedSPF, alignedDKIM))
+
 	// PTR
-	ptrCheck := ptrPlausibility(ctx, in.Message.RemoteIP)
+	ptrCheck := ptrPlausibility(ctx, in.Message.RemoteIP, in.Message.HELO)
 	report.Checks = append(report.Checks, ptrCheck)
 
 	// HELO/EHLO
@@ -187,12 +204,19 @@ func (e *Engine) Analyze(ctx context.Context, in Input) model.AnalysisReport {
 		report.Checks = append(report.Checks, pass("return_path", "Return-Path", 0.1, "Return-Path ist vorhanden.", ""))
 	}
 
+	if replyTo := strings.TrimSpace(headers.Get("Reply-To")); replyTo == "" {
+		report.Checks = append(report.Checks, info("reply_to", "Reply-To", 0.0, "Kein Reply-To-Header gesetzt.", "Wenn Antworten an eine andere Adresse gehen sollen, Reply-To bewusst setzen."))
+	} else {
+		report.Checks = append(report.Checks, pass("reply_to", "Reply-To", 0.0, "Reply-To-Header ist vorhanden.", ""))
+	}
+
 	receivedLines := headerValues(headers, "Received")
 	if len(receivedLines) == 0 {
 		report.Checks = append(report.Checks, fail("received_chain", "Received-Header-Kette", -1.2, "Keine Received-Header vorhanden.", "Transportpfad muss Received-Header enthalten."))
 	} else {
 		report.Checks = append(report.Checks, info("received_chain", "Received-Header-Kette", 0.0, fmt.Sprintf("%d Received-Header erkannt.", len(receivedLines)), ""))
 	}
+	report.Checks = append(report.Checks, tlsTransportCheck(receivedLines))
 
 	if headers.Get("ARC-Seal") != "" || headers.Get("ARC-Message-Signature") != "" {
 		report.Checks = append(report.Checks, info("arc", "ARC", 0.0, "ARC-Header vorhanden.", ""))
@@ -240,10 +264,38 @@ func (e *Engine) Analyze(ctx context.Context, in Input) model.AnalysisReport {
 		report.Checks = append(report.Checks, rspamdHeuristic(ctx, e.opts.RspamdURL, e.opts.RspamdPassword, in.Message.RawSource))
 	}
 
+	enrichCtx := checkContext{
+		Message:        in.Message,
+		SMTPDomain:     in.SMTPDomain,
+		Headers:        headers,
+		FromDomain:     fromDomain,
+		EnvelopeDomain: envelopeDomain,
+		ReturnPath:     headers.Get("Return-Path"),
+		ReturnDomain:   returnPathDomain,
+		AuthHeaders:    authHeaderValues,
+		SPFResult:      spfResult,
+		SPFRecords:     spfRecords,
+		DKIMResult:     dkimResult,
+		DKIMDomain:     dkimDomain,
+		DMARCResult:    dmarcResult,
+		DMARCRecords:   dmarcRecords,
+		DMARCPolicy:    dmarcPolicy,
+		AlignedSPF:     alignedSPF,
+		AlignedDKIM:    alignedDKIM,
+		ReceivedLines:  receivedLines,
+		ParsedBody:     parsedBody,
+		Links:          report.Links,
+	}
+	for i := range report.Checks {
+		report.Checks[i] = enrichCheckResult(report.Checks[i], enrichCtx)
+	}
+
 	for _, c := range report.Checks {
 		report.Score += c.ScoreDelta
 		if c.Status == "fail" || c.Status == "warn" {
-			if c.Suggestion != "" {
+			if c.Recommendation != "" {
+				report.Suggestions = append(report.Suggestions, c.Recommendation)
+			} else if c.Suggestion != "" {
 				report.Suggestions = append(report.Suggestions, c.Suggestion)
 			}
 		}
@@ -268,6 +320,436 @@ func fail(id, name string, delta float64, summary, suggestion string) model.Chec
 }
 func info(id, name string, delta float64, summary, suggestion string) model.CheckResult {
 	return model.CheckResult{ID: id, Name: name, Status: "info", ScoreDelta: delta, Summary: summary, Suggestion: suggestion}
+}
+
+type checkContext struct {
+	Message        model.Message
+	SMTPDomain     string
+	Headers        mail.Header
+	FromDomain     string
+	EnvelopeDomain string
+	ReturnPath     string
+	ReturnDomain   string
+	AuthHeaders    []string
+	SPFResult      string
+	SPFRecords     []string
+	DKIMResult     string
+	DKIMDomain     string
+	DMARCResult    string
+	DMARCRecords   []string
+	DMARCPolicy    string
+	AlignedSPF     bool
+	AlignedDKIM    bool
+	ReceivedLines  []string
+	ParsedBody     parsedBody
+	Links          []string
+}
+
+func mxRecordCheck(ctx context.Context, domain string) model.CheckResult {
+	domain = strings.TrimSpace(strings.TrimSuffix(domain, "."))
+	if domain == "" {
+		return info("mx_records", "MX-Records", 0.0, "Keine Domain fuer den MX-Check ermittelbar.", "Header-From oder Envelope-From sauber setzen.")
+	}
+	mxs, err := net.DefaultResolver.LookupMX(ctx, domain)
+	if err != nil || len(mxs) == 0 {
+		return warn("mx_records", "MX-Records", -0.3, fmt.Sprintf("Fuer %s wurde kein MX-Record gefunden.", domain), fmt.Sprintf("Falls %s E-Mails empfangen soll, in der DNS-Zone einen MX-Record setzen, z. B. %s. MX 10 mail.%s.", domain, domain, domain))
+	}
+	values := make([]string, 0, len(mxs))
+	for _, mx := range mxs {
+		values = append(values, fmt.Sprintf("%s MX %d %s", domain, mx.Pref, strings.TrimSuffix(mx.Host, ".")))
+	}
+	return withDetails(pass("mx_records", "MX-Records", 0.1, fmt.Sprintf("Fuer %s sind %d MX-Record(s) vorhanden.", domain, len(mxs)), ""), map[string]string{
+		"domain":     domain,
+		"mx_records": strings.Join(values, "\n"),
+	})
+}
+
+func addressRecordCheck(ctx context.Context, domain string) model.CheckResult {
+	domain = strings.TrimSpace(strings.TrimSuffix(domain, "."))
+	if domain == "" {
+		return info("address_records", "A/AAAA-Records", 0.0, "Keine Domain fuer A/AAAA-Check ermittelbar.", "Header-From oder Envelope-From sauber setzen.")
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, domain)
+	if err != nil || len(ips) == 0 {
+		return warn("address_records", "A/AAAA-Records", -0.3, fmt.Sprintf("%s loest nicht auf A/AAAA auf.", domain), fmt.Sprintf("In der DNS-Zone A/AAAA-Records fuer %s setzen, wenn diese Domain direkt als Hostname verwendet wird.", domain))
+	}
+	values := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		values = append(values, ip.IP.String())
+	}
+	return withDetails(pass("address_records", "A/AAAA-Records", 0.1, fmt.Sprintf("%s loest auf %d Adresse(n) auf.", domain, len(ips)), ""), map[string]string{
+		"domain":         domain,
+		"a_aaaa_records": strings.Join(values, "\n"),
+	})
+}
+
+func spfAlignmentCheck(fromDomain, envelopeDomain, spfResult string, aligned bool) model.CheckResult {
+	if fromDomain == "" || envelopeDomain == "" {
+		return warn("spf_alignment", "SPF Alignment", -0.4, "SPF-Alignment konnte nicht vollstaendig bewertet werden.", "Header-From und Envelope-From mit klaren Domains setzen.")
+	}
+	if spfResult == "pass" && aligned {
+		return pass("spf_alignment", "SPF Alignment", 0.2, "SPF besteht und ist mit der sichtbaren From-Domain aligned.", "")
+	}
+	if spfResult == "pass" {
+		return warn("spf_alignment", "SPF Alignment", -0.4, "SPF besteht, ist aber nicht mit der sichtbaren From-Domain aligned.", "Envelope-From/Bounce-Domain auf eine Subdomain der sichtbaren From-Domain umstellen oder DKIM Alignment sicherstellen.")
+	}
+	return warn("spf_alignment", "SPF Alignment", -0.5, "SPF liefert kein pass; dadurch kann SPF nicht fuer DMARC-Alignment zaehlen.", "SPF fuer die Envelope-From-Domain korrigieren.")
+}
+
+func dkimAlignmentCheck(fromDomain, dkimDomain, dkimResult string, aligned bool) model.CheckResult {
+	if dkimResult != "pass" {
+		return warn("dkim_alignment", "DKIM Alignment", -0.5, "DKIM liefert kein pass; DKIM kann nicht fuer DMARC-Alignment zaehlen.", "DKIM-Signatur fuer die sichtbare From-Domain oder eine passende Subdomain aktivieren.")
+	}
+	if aligned {
+		return pass("dkim_alignment", "DKIM Alignment", 0.2, "DKIM besteht und ist mit der sichtbaren From-Domain aligned.", "")
+	}
+	return warn("dkim_alignment", "DKIM Alignment", -0.4, "DKIM besteht, aber die Signaturdomain passt nicht zur sichtbaren From-Domain.", "DKIM d= auf die From-Domain oder eine erlaubte Subdomain setzen.")
+}
+
+func dmarcAlignmentCheck(fromDomain, spfResult, dkimResult string, alignedSPF, alignedDKIM bool) model.CheckResult {
+	if fromDomain == "" {
+		return warn("dmarc_alignment", "DMARC Alignment", -0.5, "DMARC-Alignment konnte ohne From-Domain nicht bewertet werden.", "Einen gueltigen From-Header mit Domain setzen.")
+	}
+	if (spfResult == "pass" && alignedSPF) || (dkimResult == "pass" && alignedDKIM) {
+		return pass("dmarc_alignment", "DMARC Alignment", 0.2, "Mindestens SPF oder DKIM ist aligned und kann DMARC tragen.", "")
+	}
+	return fail("dmarc_alignment", "DMARC Alignment", -0.9, "Weder SPF noch DKIM sind aligned; DMARC kann dadurch scheitern.", "SPF oder DKIM so konfigurieren, dass die authentifizierte Domain zur Header-From-Domain passt.")
+}
+
+func tlsTransportCheck(received []string) model.CheckResult {
+	raw := strings.ToLower(strings.Join(received, "\n"))
+	if strings.Contains(raw, "tls") || strings.Contains(raw, "esmtps") || strings.Contains(raw, "cipher") {
+		return pass("tls_transport", "TLS Transport", 0.1, "Received-Header enthalten Hinweise auf verschluesselten Transport.", "")
+	}
+	return info("tls_transport", "TLS Transport", 0.0, "Aus den Received-Headern ist kein TLS-Transport eindeutig erkennbar.", "TLS fuer SMTP aktivieren und sicherstellen, dass vorgelagerte MTAs TLS-Informationen in Received-Headern dokumentieren.")
+}
+
+func withDetails(c model.CheckResult, details map[string]string) model.CheckResult {
+	c.TechnicalDetails = details
+	return c
+}
+
+func enrichCheckResult(c model.CheckResult, ctx checkContext) model.CheckResult {
+	c.Category = checkCategory(c.ID)
+	c.Severity = checkSeverity(c.Status)
+	base := baseDetails(ctx)
+	if c.TechnicalDetails == nil {
+		c.TechnicalDetails = base
+	} else {
+		for key, value := range base {
+			if _, ok := c.TechnicalDetails[key]; !ok {
+				c.TechnicalDetails[key] = value
+			}
+		}
+	}
+	addHeaderDetail(c.TechnicalDetails, "from", ctx.Headers.Get("From"))
+	addHeaderDetail(c.TechnicalDetails, "subject", ctx.Headers.Get("Subject"))
+	addCheckSpecificDetails(c.TechnicalDetails, c.ID, ctx)
+	switch c.ID {
+	case "spf":
+		c.Name = "SPF fuer " + emptyFallback(ctx.EnvelopeDomain, "Envelope-From")
+		c.TechnicalDetails["spf_result"] = emptyFallback(ctx.SPFResult, "none")
+		c.TechnicalDetails["spf_records"] = joinOrNone(ctx.SPFRecords)
+		c.Explanation = "SPF legt fest, welche Server im Namen der Envelope-From-Domain senden duerfen. Gmail, Outlook und Yahoo bewerten fehlende oder fehlschlagende SPF-Ergebnisse deutlich negativ, besonders wenn DMARC aktiv ist."
+		c.Recommendation = spfRecommendation(ctx)
+	case "dkim":
+		c.TechnicalDetails["dkim_result"] = emptyFallback(ctx.DKIMResult, "none")
+		c.TechnicalDetails["dkim_domain"] = emptyFallback(ctx.DKIMDomain, "none")
+		c.TechnicalDetails["dkim_signature"] = emptyFallback(ctx.Headers.Get("DKIM-Signature"), "none")
+		c.Explanation = "DKIM signiert die Nachricht kryptografisch. Provider wie Gmail, Outlook, Yahoo und Apple Mail nutzen DKIM stark, um Manipulationen und spoofing zu erkennen."
+		c.Recommendation = dkimRecommendation(ctx)
+	case "dmarc":
+		c.TechnicalDetails["dmarc_result"] = emptyFallback(ctx.DMARCResult, "none")
+		c.TechnicalDetails["dmarc_records"] = joinOrNone(ctx.DMARCRecords)
+		c.TechnicalDetails["policy"] = emptyFallback(ctx.DMARCPolicy, "none")
+		c.Explanation = "DMARC verbindet SPF/DKIM mit der sichtbaren From-Domain. Moderne Provider erwarten fuer serioese Versanddomains mindestens eine DMARC-Policy."
+		c.Recommendation = dmarcRecommendation(ctx)
+	case "ptr":
+		c.TechnicalDetails["expected"] = fmt.Sprintf("IP %s -> PTR %s -> A/AAAA %s", emptyFallback(ctx.Message.RemoteIP, "unknown"), emptyFallback(ctx.Message.HELO, "mail.example.tld"), emptyFallback(ctx.Message.RemoteIP, "sender-ip"))
+		c.Explanation = "Reverse DNS zeigt, welcher Hostname zu einer sendenden IP gehoert. Viele Provider lehnen Server ohne plausiblen PTR ab oder werten sie ab."
+		c.Recommendation = fmt.Sprintf("Beim Server- oder IP-Provider den PTR der IP %s auf den Mailserver-Hostnamen setzen. Empfohlen: PTR/rDNS %s und HELO/EHLO %s. Zusaetzlich muss dieser Hostname per A/AAAA wieder auf die sendende IP zeigen.", emptyFallback(ctx.Message.RemoteIP, "<sender-ip>"), emptyFallback(ctx.Message.HELO, "mail.example.tld"), emptyFallback(ctx.Message.HELO, "mail.example.tld"))
+	case "helo":
+		c.Explanation = "HELO/EHLO ist der Name, mit dem sich der sendende Mailserver beim Empfaenger meldet. Er sollte ein stabiler FQDN sein und zum PTR passen."
+		c.Recommendation = fmt.Sprintf("Im Mailserver den SMTP-Hostname auf einen FQDN setzen, z. B. Postfix `myhostname = %s`. Der gleiche Name sollte im PTR/rDNS der IP stehen.", emptyFallback(ctx.Message.HELO, "mail.example.tld"))
+	case "mx_records":
+		c.Explanation = "MX-Records definieren, welcher Mailserver E-Mails fuer eine Domain annimmt. Fuer reine Versanddomains ist das nicht immer zwingend, verbessert aber die technische Plausibilitaet."
+		if c.Recommendation == "" {
+			c.Recommendation = fmt.Sprintf("Falls %s E-Mails empfangen soll, in der DNS-Zone einen gueltigen MX-Record pflegen.", emptyFallback(ctx.FromDomain, ctx.EnvelopeDomain))
+		}
+	case "address_records":
+		c.Explanation = "A/AAAA-Records zeigen, auf welche IPs eine Domain zeigt. HELO-, MX- und DKIM/DMARC-nahe Hostnamen sollten sauber aufloesen."
+		if c.Recommendation == "" {
+			c.Recommendation = "DNS-Zone pruefen und fuer verwendete Hostnamen passende A/AAAA-Records setzen."
+		}
+	case "spamassassin":
+		c.Explanation = "SpamAssassin bewertet viele Inhalts-, Header- und Reputationssignale. Es ist kein globaler Standard, aber ein guter Hinweis auf klassische Spam-Muster."
+		if c.Recommendation == "" {
+			c.Recommendation = "Die ausgegebenen SpamAssassin-Regeln priorisieren und zuerst Authentifizierung, Betreff, Links und HTML-Struktur bereinigen."
+		}
+	case "rbl":
+		c.Explanation = "RBLs listen IPs mit Spam-, Abuse- oder Botnet-Historie. Gmail, Outlook und andere Provider nutzen eigene Systeme, reagieren aber ebenfalls empfindlich auf IP-Reputation."
+		if c.Recommendation == "" {
+			c.Recommendation = fmt.Sprintf("Falls gelistet: Ursache abstellen, Versand stoppen, Logs pruefen und anschliessend Delisting beim jeweiligen RBL-Anbieter fuer IP %s beantragen.", emptyFallback(ctx.Message.RemoteIP, "<sender-ip>"))
+		}
+	default:
+		c.Explanation = defaultExplanation(c.ID)
+		if c.Recommendation == "" {
+			c.Recommendation = defaultRecommendation(c, ctx)
+		}
+	}
+	if c.Recommendation == "" {
+		c.Recommendation = c.Suggestion
+	}
+	return c
+}
+
+func baseDetails(ctx checkContext) map[string]string {
+	return map[string]string{
+		"from_domain":     emptyFallback(ctx.FromDomain, "none"),
+		"envelope_domain": emptyFallback(ctx.EnvelopeDomain, "none"),
+		"remote_ip":       emptyFallback(ctx.Message.RemoteIP, "unknown"),
+		"helo_ehlo":       emptyFallback(ctx.Message.HELO, "unknown"),
+		"return_path":     emptyFallback(ctx.ReturnPath, "none"),
+		"auth_results":    joinOrNone(ctx.AuthHeaders),
+	}
+}
+
+func addHeaderDetail(details map[string]string, key, value string) {
+	if strings.TrimSpace(value) != "" {
+		details["header_"+key] = strings.TrimSpace(value)
+	}
+}
+
+func addCheckSpecificDetails(details map[string]string, id string, ctx checkContext) {
+	body := ctx.ParsedBody
+	switch id {
+	case "from_alignment":
+		details["header_from_domain"] = emptyFallback(ctx.FromDomain, "none")
+		details["envelope_from_domain"] = emptyFallback(ctx.EnvelopeDomain, "none")
+	case "return_path":
+		details["return_path_domain"] = emptyFallback(ctx.ReturnDomain, "none")
+	case "reply_to":
+		details["reply_to"] = emptyFallback(ctx.Headers.Get("Reply-To"), "none")
+	case "spf_alignment":
+		details["spf_result"] = emptyFallback(ctx.SPFResult, "none")
+		details["spf_aligned"] = strconv.FormatBool(ctx.AlignedSPF)
+	case "dkim_alignment":
+		details["dkim_result"] = emptyFallback(ctx.DKIMResult, "none")
+		details["dkim_domain"] = emptyFallback(ctx.DKIMDomain, "none")
+		details["dkim_aligned"] = strconv.FormatBool(ctx.AlignedDKIM)
+	case "dmarc_alignment":
+		details["spf_result"] = emptyFallback(ctx.SPFResult, "none")
+		details["dkim_result"] = emptyFallback(ctx.DKIMResult, "none")
+		details["spf_aligned"] = strconv.FormatBool(ctx.AlignedSPF)
+		details["dkim_aligned"] = strconv.FormatBool(ctx.AlignedDKIM)
+	case "received_chain", "tls_transport":
+		details["received_count"] = strconv.Itoa(len(ctx.ReceivedLines))
+		details["received_headers"] = joinOrNone(ctx.ReceivedLines)
+	case "arc":
+		details["arc_seal"] = emptyFallback(ctx.Headers.Get("ARC-Seal"), "none")
+		details["arc_message_signature"] = emptyFallback(ctx.Headers.Get("ARC-Message-Signature"), "none")
+	case "mime_ct", "mime_boundary", "multipart_alt", "plain_text", "attachments", "image_text_ratio", "charset":
+		addBodyDetails(details, ctx)
+	case "links", "shortener", "tracking_links":
+		details["link_count"] = strconv.Itoa(len(ctx.Links))
+		details["links"] = joinOrNone(ctx.Links)
+	case "html", "hidden_html", "html_validity":
+		addBodyDetails(details, ctx)
+		details["html_chars"] = strconv.Itoa(len([]rune(body.HTML)))
+	case "subject", "subject_exclaim", "subject_caps":
+		subject := ctx.Headers.Get("Subject")
+		details["subject"] = emptyFallback(subject, "none")
+		details["subject_chars"] = strconv.Itoa(len([]rune(subject)))
+		details["exclamation_count"] = strconv.Itoa(strings.Count(subject, "!"))
+	case "date", "date_skew":
+		details["date_header"] = emptyFallback(ctx.Headers.Get("Date"), "none")
+	case "message_id":
+		details["message_id"] = firstNonEmpty(ctx.Headers.Get("Message-ID"), ctx.Headers.Get("Message-Id"), "none")
+	case "list_unsub":
+		details["list_unsubscribe"] = emptyFallback(ctx.Headers.Get("List-Unsubscribe"), "none")
+		details["list_id"] = emptyFallback(ctx.Headers.Get("List-ID"), "none")
+		details["precedence"] = emptyFallback(ctx.Headers.Get("Precedence"), "none")
+	case "preheader":
+		addBodyDetails(details, ctx)
+	case "unicode":
+		details["text_chars"] = strconv.Itoa(len([]rune(body.AllText)))
+	}
+}
+
+func addBodyDetails(details map[string]string, ctx checkContext) {
+	body := ctx.ParsedBody
+	details["content_type"] = emptyFallback(ctx.Headers.Get("Content-Type"), "none")
+	details["content_transfer_encoding"] = emptyFallback(ctx.Headers.Get("Content-Transfer-Encoding"), "none")
+	details["part_count"] = strconv.Itoa(body.PartCount)
+	details["has_text_part"] = strconv.FormatBool(body.HasTextPart)
+	details["has_html_part"] = strconv.FormatBool(body.HasHTMLPart)
+	details["text_chars"] = strconv.Itoa(len([]rune(body.Text)))
+	details["html_chars"] = strconv.Itoa(len([]rune(body.HTML)))
+	details["attachment_count"] = strconv.Itoa(body.Attachments)
+	details["image_count"] = strconv.Itoa(body.Images)
+	details["charset"] = emptyFallback(body.Charset, "none")
+}
+
+func checkCategory(id string) string {
+	switch id {
+	case "spf", "dkim", "dmarc", "spf_alignment", "dkim_alignment", "dmarc_alignment", "from_alignment", "return_path", "reply_to":
+		return "Authentifizierung"
+	case "ptr", "helo", "mx_records", "address_records", "tls_transport", "received_chain", "rbl":
+		return "DNS und Infrastruktur"
+	case "spamassassin", "rspamd":
+		return "Spamfilter"
+	case "mime_ct", "mime_boundary", "plain_text", "multipart_alt", "attachments", "image_text_ratio", "charset", "links", "shortener", "tracking_links", "html", "hidden_html", "html_validity", "subject", "subject_exclaim", "subject_caps", "unicode", "list_unsub", "preheader":
+		return "Format und Inhalt"
+	default:
+		return "Header und Rohdaten"
+	}
+}
+
+func checkSeverity(status string) string {
+	switch status {
+	case "fail":
+		return "high"
+	case "warn":
+		return "medium"
+	case "pass":
+		return "low"
+	default:
+		return "info"
+	}
+}
+
+func defaultExplanation(id string) string {
+	switch id {
+	case "from_alignment", "spf_alignment", "dkim_alignment", "dmarc_alignment":
+		return "Alignment prueft, ob technische Authentifizierung und sichtbare From-Domain zusammenpassen. Gmail, Outlook, Yahoo und Apple Mail gewichten das stark, weil damit Spoofing und Phishing erkannt werden."
+	case "return_path":
+		return "Return-Path ist die Bounce-Adresse, die der empfangende Server aus dem SMTP Envelope ableitet. Sie sollte technisch zur Versanddomain passen und fuer SPF/DMARC nachvollziehbar sein."
+	case "mime_ct", "mime_boundary", "multipart_alt":
+		return "MIME beschreibt den Aufbau der Nachricht. Fehlerhafte MIME-Strukturen fuehren dazu, dass Clients Inhalte falsch darstellen oder Spamfilter die Mail abwerten."
+	case "plain_text":
+		return "Ein Plaintext-Part verbessert Kompatibilitaet und wirkt fuer Spamfilter natuerlicher als reine HTML-Mails."
+	case "attachments":
+		return "Anhaenge erhoehen Risiko und Groesse der Mail. Einige Provider pruefen Dateityp, Signaturen und Reputation besonders streng."
+	case "image_text_ratio":
+		return "Mails mit vielen Bildern und wenig Text wirken oft wie Werbe- oder Phishing-Mails und werden haeufig schlechter bewertet."
+	case "links", "shortener", "tracking_links":
+		return "Links werden von Mailprovidern intensiv geprueft. Kurzlinks, Weiterleitungen und aggressive Tracking-Parameter koennen Vertrauen reduzieren."
+	case "html", "hidden_html", "html_validity":
+		return "HTML wird von Mailclients restriktiv gerendert und von Spamfiltern auf versteckte Inhalte, Phishing-Muster und kaputte Struktur geprueft."
+	case "subject", "subject_exclaim", "subject_caps":
+		return "Der Betreff ist ein starkes Nutzer- und Spamfilter-Signal. Reisserische Zeichen, reine Grossschreibung oder fehlender Kontext verschlechtern die Einstufung."
+	case "message_id":
+		return "Eine stabile Message-ID ist ein RFC-Basismerkmal und hilft bei Threading, Duplikaterkennung und Reputation."
+	case "date", "date_skew":
+		return "Der Date-Header sollte plausibel zur Versandzeit passen. Starke Abweichungen wirken wie fehlerhafte Serverzeit oder manipulierte Nachrichten."
+	case "tls_transport":
+		return "TLS schuetzt den Transport zwischen Mailservern. Viele Provider erwarten heute STARTTLS-Unterstuetzung."
+	case "reply_to":
+		return "Reply-To steuert, wohin Antworten gehen. Abweichungen zur From-Adresse koennen legitim sein, sollten aber bewusst gesetzt sein."
+	case "list_unsub", "preheader":
+		return "Newsletter-Provider und grosse Mailboxanbieter erwarten klare Abmelde- und Vorschau-Signale. Gmail und Yahoo bewerten List-Unsubscribe fuer Bulk-Mail besonders stark."
+	case "unicode":
+		return "Unicode ist normal fuer viele Sprachen, aber Zero-Width-Zeichen oder obfuskierte Zeichenmischungen werden haeufig fuer Spam und Phishing genutzt."
+	case "received_chain":
+		return "Received-Header dokumentieren den Transportweg. Fehlende oder unplausible Header erschweren die technische Bewertung durch empfangende Systeme."
+	default:
+		return "Dieser Check bewertet ein technisches Signal, das Mailprovider fuer Zustellbarkeit, Missbrauchserkennung oder Nutzervertrauen heranziehen."
+	}
+}
+
+func defaultRecommendation(c model.CheckResult, ctx checkContext) string {
+	if c.Suggestion != "" {
+		return c.Suggestion
+	}
+	switch c.ID {
+	case "from_alignment":
+		return fmt.Sprintf("Envelope-From/Bounce-Domain und sichtbare From-Domain angleichen. Aktuell: Header-From `%s`, Envelope-From-Domain `%s`. Empfehlenswert ist z. B. Bounce-Adresse `bounce@%s` oder eine Subdomain wie `bounce.%s`, die per SPF autorisiert ist.", emptyFallback(ctx.Headers.Get("From"), "none"), emptyFallback(ctx.EnvelopeDomain, "none"), emptyFallback(ctx.FromDomain, "example.org"), emptyFallback(ctx.FromDomain, "example.org"))
+	case "return_path":
+		return fmt.Sprintf("Im Versand-MTA oder ESP eine gueltige Envelope-From/Bounce-Adresse setzen. Beispiel fuer die DNS-/MTA-Konfiguration: `bounce@%s` mit SPF-Record fuer die sendende IP %s.", emptyFallback(ctx.FromDomain, "example.org"), emptyFallback(ctx.Message.RemoteIP, "203.0.113.10"))
+	case "reply_to":
+		return "Wenn Antworten an eine andere Adresse gehen sollen, Reply-To bewusst setzen, z. B. `Reply-To: support@example.org`. Wenn nicht, Reply-To weglassen oder zur sichtbaren From-Domain passend halten."
+	case "spf_alignment":
+		return fmt.Sprintf("SPF fuer die Envelope-From-Domain `%s` so konfigurieren, dass die sendende IP %s erlaubt ist, und die Bounce-Domain als gleiche Domain oder Subdomain von `%s` verwenden.", emptyFallback(ctx.EnvelopeDomain, "none"), emptyFallback(ctx.Message.RemoteIP, "<sender-ip>"), emptyFallback(ctx.FromDomain, "example.org"))
+	case "dkim_alignment":
+		return fmt.Sprintf("DKIM mit einer Domain signieren, die zur sichtbaren From-Domain passt. Beispiel: `d=%s` oder eine erlaubte Subdomain; DNS-Record unter `selector._domainkey.%s` setzen.", emptyFallback(ctx.FromDomain, "example.org"), emptyFallback(ctx.FromDomain, "example.org"))
+	case "dmarc_alignment":
+		return fmt.Sprintf("Mindestens SPF oder DKIM muss aligned bestehen. Praktisch: DKIM-Signatur mit `d=%s` aktivieren und SPF fuer `%s` korrigieren; DMARC-Record unter `_dmarc.%s` pflegen.", emptyFallback(ctx.FromDomain, "example.org"), emptyFallback(ctx.EnvelopeDomain, "example.org"), emptyFallback(ctx.FromDomain, "example.org"))
+	case "received_chain":
+		return "Der empfangende SMTP-Server sollte mindestens einen Received-Header schreiben. Wenn vorgeschaltete Relays Header entfernen, deren Konfiguration pruefen und RFC-konforme Received-Zeilen erhalten."
+	case "message_id":
+		return "Mailserver oder Versandsoftware so konfigurieren, dass jede Nachricht eine eindeutige Message-ID erzeugt, z. B. `<unique-id@" + emptyFallback(ctx.FromDomain, "example.org") + ">`."
+	case "mime_ct", "mime_boundary", "multipart_alt":
+		return "Das Template als RFC-konforme MIME-Mail erzeugen. Fuer HTML-Mails empfohlen: `multipart/alternative` mit `text/plain` und `text/html`, sauberer Boundary und `Content-Type: multipart/alternative; boundary=...`."
+	case "plain_text":
+		return "Im Versandtemplate einen text/plain-Part zusaetzlich zum HTML-Part ausliefern."
+	case "attachments":
+		return "Anhaenge nur verwenden, wenn noetig. Grosse Dateien extern verlinken, Dateinamen klar halten und riskante Dateitypen wie ausfuehrbare Dateien vermeiden."
+	case "image_text_ratio":
+		return "Mehr echten Text in die Mail aufnehmen und Bild-only-Layouts vermeiden. Richtwert: zentrale Aussage als Text ausgeben, Bilder mit Alt-Text versehen und nicht mehr als wenige Hero-/Produktbilder verwenden."
+	case "charset":
+		return "UTF-8 als Charset verwenden und Content-Type korrekt setzen, z. B. `Content-Type: text/html; charset=UTF-8`."
+	case "links":
+		return "Nur notwendige Links verwenden und sichtbare Link-Domain, Ziel-Domain und Absenderdomain plausibel zusammenhalten. Kritische Links mit der eigenen Domain oder einer sauber eingerichteten Tracking-Domain ausliefern."
+	case "shortener":
+		return "URL-Shortener entfernen. Stattdessen direkte HTTPS-URLs oder eine eigene Tracking-Domain mit passendem CNAME/A-Record und TLS verwenden."
+	case "tracking_links":
+		return "Tracking-Parameter reduzieren. Wenn Tracking notwendig ist, eine eigene Subdomain wie `click." + emptyFallback(ctx.FromDomain, "example.org") + "` verwenden und diese sauber per DNS/TLS konfigurieren."
+	case "html", "hidden_html", "html_validity":
+		return "HTML-Template validieren, versteckte Elemente minimieren und kritische Inhalte nicht per `display:none`, `font-size:0` oder komplexem CSS verstecken. Lange CSS-Blöcke und kaputte Tags bereinigen."
+	case "subject":
+		return "Einen konkreten, normalen Betreff setzen, der Inhalt und Absender widerspiegelt. Beispiel: `Ihre Buchungsbestätigung fuer Veranstaltung XY` statt leerer oder generischer Betreffzeile."
+	case "subject_exclaim", "subject_caps":
+		return "Betreff normalisieren: wenige Satzzeichen, keine durchgehende Grossschreibung, keine aggressiven Triggerwoerter. Beispiel: `Aktualisierung zu Ihrer Bestellung`."
+	case "date", "date_skew":
+		return "Serverzeit per NTP synchronisieren und Date-Header vom MTA korrekt erzeugen lassen. Bei Postfix/Exim keine manuell manipulierten Date-Header aus der Anwendung erzwingen."
+	case "tls_transport":
+		return "STARTTLS am ausgehenden MTA aktivieren und Zertifikat/Hostname pruefen."
+	case "list_unsub":
+		return "Fuer Newsletter einen RFC-konformen Header setzen, z. B. `List-Unsubscribe: <mailto:unsubscribe@" + emptyFallback(ctx.FromDomain, "example.org") + ">, <https://" + emptyFallback(ctx.FromDomain, "example.org") + "/unsubscribe/...>` und optional `List-Unsubscribe-Post: List-Unsubscribe=One-Click`."
+	case "preheader":
+		return "Im HTML-Template einen kurzen Preheader direkt am Anfang des Body platzieren. Beispiel: ein 80-120 Zeichen langer Vorschautext, visuell dezent versteckt, aber nicht missbraeuchlich obfuskiert."
+	case "unicode":
+		return "Zero-Width-Zeichen und unnoetige Unicode-Obfuskation aus Betreff und Body entfernen. Normale Sonderzeichen fuer Sprache sind ok; versteckte Zeichen sollten vermieden werden."
+	default:
+		return "Den genannten Wert im Mailserver, DNS oder Versandtemplate korrigieren und danach erneut testen."
+	}
+}
+
+func spfRecommendation(ctx checkContext) string {
+	domain := emptyFallback(ctx.EnvelopeDomain, "example.org")
+	if len(ctx.SPFRecords) == 0 {
+		return fmt.Sprintf("In der DNS-Zone der Envelope-From-Domain einen SPF-TXT-Record setzen. Beispiel: `%s. TXT \"v=spf1 ip4:%s -all\"`. Wenn ueber Dienstleister gesendet wird, dessen include-Mechanismus verwenden.", domain, emptyFallback(ctx.Message.RemoteIP, "203.0.113.10"))
+	}
+	return fmt.Sprintf("SPF-Record fuer %s pruefen und sicherstellen, dass die sendende IP %s oder der verwendete Versanddienst erlaubt ist. Aktuelle Records: %s", domain, emptyFallback(ctx.Message.RemoteIP, "<sender-ip>"), strings.Join(ctx.SPFRecords, " | "))
+}
+
+func dkimRecommendation(ctx checkContext) string {
+	domain := emptyFallback(ctx.FromDomain, "example.org")
+	return fmt.Sprintf("DKIM im ausgehenden MTA oder Versanddienst aktivieren. In der DNS-Zone einen Selector-TXT-Record setzen, z. B. `selector1._domainkey.%s. TXT \"v=DKIM1; k=rsa; p=<public-key>\"`, und mit `d=%s` signieren.", domain, domain)
+}
+
+func dmarcRecommendation(ctx checkContext) string {
+	domain := emptyFallback(ctx.FromDomain, "example.org")
+	if len(ctx.DMARCRecords) == 0 {
+		return fmt.Sprintf("In der DNS-Zone einen DMARC-Record setzen. Einstieg: `_dmarc.%s. TXT \"v=DMARC1; p=none; rua=mailto:dmarc@%s\"`. Nach Stabilisierung auf `quarantine` oder `reject` erhoehen.", domain, domain)
+	}
+	return fmt.Sprintf("DMARC fuer %s pruefen: SPF oder DKIM muss aligned bestehen. Aktuelle Policy: %s.", domain, emptyFallback(ctx.DMARCPolicy, "none"))
+}
+
+func joinOrNone(values []string) string {
+	if len(values) == 0 {
+		return "none"
+	}
+	return strings.Join(values, "\n")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func clampScore(s float64) float64 {
@@ -336,7 +818,7 @@ func domainPart(v string) string {
 	return strings.ToLower(v[at+1:])
 }
 
-func ptrPlausibility(ctx context.Context, ip string) model.CheckResult {
+func ptrPlausibility(ctx context.Context, ip, helo string) model.CheckResult {
 	parsed := net.ParseIP(strings.TrimSpace(ip))
 	if parsed == nil {
 		return warn("ptr", "PTR/rDNS", -0.4, "Remote-IP ist ungültig, PTR nicht prüfbar.", "SMTP-Quelle prüfen.")
@@ -352,6 +834,10 @@ func ptrPlausibility(ctx context.Context, ip string) model.CheckResult {
 	}
 	for _, candidate := range fwd {
 		if candidate == parsed.String() {
+			hostMatchesHELO := strings.EqualFold(host, strings.TrimSuffix(strings.ToLower(strings.TrimSpace(helo)), "."))
+			if helo != "" && !hostMatchesHELO {
+				return warn("ptr", "PTR/rDNS", -0.4, "PTR und Forward DNS sind konsistent, passen aber nicht zum HELO/EHLO.", "PTR/rDNS und HELO/EHLO auf denselben Mailserver-Hostnamen setzen.")
+			}
 			return pass("ptr", "PTR/rDNS", 0.2, "PTR und Forward DNS sind konsistent.", "")
 		}
 	}
@@ -659,45 +1145,62 @@ func newsletterHeuristics(headers mail.Header, body parsedBody) []model.CheckRes
 
 func rblHeuristics(ctx context.Context, remoteIP string, providers []string) []model.CheckResult {
 	if len(providers) == 0 {
-		return []model.CheckResult{info("rbl", "DNSBL/RBL", 0.0, "RBL-Prüfung aktiv, aber keine Provider konfiguriert.", "")}
+		return []model.CheckResult{info("rbl", "DNSBL/RBL", 0.0, "RBL-Pruefung aktiv, aber keine Provider konfiguriert.", "")}
 	}
 	ip := net.ParseIP(remoteIP)
 	if ip == nil || ip.To4() == nil {
-		return []model.CheckResult{info("rbl", "DNSBL/RBL", 0.0, "RBL nur für IPv4 geprüft.", "")}
+		return []model.CheckResult{info("rbl", "DNSBL/RBL", 0.0, "RBL nur fuer IPv4 geprueft.", "")}
 	}
 	octets := strings.Split(ip.String(), ".")
 	queryIP := fmt.Sprintf("%s.%s.%s.%s", octets[3], octets[2], octets[1], octets[0])
 	listed := 0
+	listedProviders := make([]string, 0)
+	cleanProviders := make([]string, 0, len(providers))
 	for _, p := range providers {
-		name := queryIP + "." + strings.TrimSpace(p)
+		provider := strings.TrimSpace(p)
+		if provider == "" {
+			continue
+		}
+		cleanProviders = append(cleanProviders, provider)
+		name := queryIP + "." + provider
 		ips, _ := net.DefaultResolver.LookupHost(ctx, name)
 		if len(ips) > 0 {
 			listed++
+			listedProviders = append(listedProviders, provider+" -> "+strings.Join(ips, ", "))
 		}
 	}
-	if listed > 0 {
-		return []model.CheckResult{warn("rbl", "DNSBL/RBL", -0.8, fmt.Sprintf("Absender-IP auf %d RBL(s) gelistet.", listed), "IP-Reputation prüfen und Delisting durchführen.")}
+	details := map[string]string{
+		"remote_ip":         remoteIP,
+		"rbl_query_prefix":  queryIP,
+		"checked_providers": strings.Join(cleanProviders, "\n"),
+		"listed_providers":  emptyFallback(strings.Join(listedProviders, "\n"), "none"),
 	}
-	return []model.CheckResult{pass("rbl", "DNSBL/RBL", 0.1, "Keine RBL-Listings in konfigurierten Listen erkannt.", "")}
+	if listed > 0 {
+		return []model.CheckResult{withDetails(warn("rbl", "DNSBL/RBL", -0.8, fmt.Sprintf("Absender-IP auf %d RBL(s) gelistet.", listed), "IP-Reputation pruefen und Delisting durchfuehren."), details)}
+	}
+	return []model.CheckResult{withDetails(pass("rbl", "DNSBL/RBL", 0.1, "Keine RBL-Listings in konfigurierten Listen erkannt.", ""), details)}
 }
-
 func spamAssassinHeuristic(ctx context.Context, hostport, raw string) model.CheckResult {
+	details := map[string]string{"spamd_hostport": hostport}
 	d := net.Dialer{Timeout: 3 * time.Second}
 	conn, err := d.DialContext(ctx, "tcp", hostport)
 	if err != nil {
-		return info("spamassassin", "SpamAssassin", 0.0, "SpamAssassin nicht erreichbar.", "Optionalen spamd-Dienst prüfen oder Option deaktivieren.")
+		details["error"] = err.Error()
+		return withDetails(info("spamassassin", "SpamAssassin", 0.0, "SpamAssassin nicht erreichbar.", "Optionalen spamd-Dienst pruefen oder Option deaktivieren."), details)
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 
 	req := fmt.Sprintf("SYMBOLS SPAMC/1.5\r\nContent-length: %d\r\n\r\n%s", len(raw), raw)
 	if _, err := conn.Write([]byte(req)); err != nil {
-		return info("spamassassin", "SpamAssassin", 0.0, "SpamAssassin Anfrage fehlgeschlagen.", "spamd-Verbindung prüfen.")
+		details["error"] = err.Error()
+		return withDetails(info("spamassassin", "SpamAssassin", 0.0, "SpamAssassin Anfrage fehlgeschlagen.", "spamd-Verbindung pruefen."), details)
 	}
 
 	resp, err := readLimited(conn, 64*1024)
 	if err != nil {
-		return info("spamassassin", "SpamAssassin", 0.0, "SpamAssassin Antwort nicht lesbar.", "spamd Antwortformat prüfen.")
+		details["error"] = err.Error()
+		return withDetails(info("spamassassin", "SpamAssassin", 0.0, "SpamAssassin Antwort nicht lesbar.", "spamd Antwortformat pruefen."), details)
 	}
 	lower := strings.ToLower(string(resp))
 	spamLine := ""
@@ -707,13 +1210,14 @@ func spamAssassinHeuristic(ctx context.Context, hostport, raw string) model.Chec
 			break
 		}
 	}
+	details["spam_line"] = emptyFallback(spamLine, "none")
 	if strings.Contains(lower, "spam: true") {
-		return warn("spamassassin", "SpamAssassin", -1.0, emptyFallback(spamLine, "SpamAssassin stuft Nachricht als Spam ein."), "SpamAssassin-Regeln/Symbole prüfen und Mailinhalt überarbeiten.")
+		return withDetails(warn("spamassassin", "SpamAssassin", -1.0, emptyFallback(spamLine, "SpamAssassin stuft Nachricht als Spam ein."), "SpamAssassin-Regeln/Symbole pruefen und Mailinhalt ueberarbeiten."), details)
 	}
 	if spamLine != "" {
-		return pass("spamassassin", "SpamAssassin", 0.2, spamLine, "")
+		return withDetails(pass("spamassassin", "SpamAssassin", 0.2, spamLine, ""), details)
 	}
-	return info("spamassassin", "SpamAssassin", 0.0, "SpamAssassin Antwort ohne klassisches Spam-Headerformat erhalten.", "")
+	return withDetails(info("spamassassin", "SpamAssassin", 0.0, "SpamAssassin Antwort ohne klassisches Spam-Headerformat erhalten.", ""), details)
 }
 
 type rspamdCheckResult struct {
@@ -769,19 +1273,26 @@ func rspamdHeuristic(ctx context.Context, endpointURL, password, raw string) mod
 	}
 	summary := fmt.Sprintf("Rspamd action=%s score=%.2f required=%.2f symbols=%d%s", emptyFallback(action, "unknown"), parsed.Score, parsed.RequiredScore, len(parsed.Symbols), topSummary)
 	suggestion := rspamdSuggestionFor(topSymbols, action)
+	details := map[string]string{
+		"action":         emptyFallback(action, "unknown"),
+		"score":          fmt.Sprintf("%.2f", parsed.Score),
+		"required_score": fmt.Sprintf("%.2f", parsed.RequiredScore),
+		"symbol_count":   strconv.Itoa(len(parsed.Symbols)),
+		"top_symbols":    emptyFallback(strings.TrimPrefix(strings.TrimSuffix(topSummary, "]"), " top=["), "none"),
+	}
 
 	switch action {
 	case "reject", "soft reject":
-		return fail("rspamd", "Rspamd", -1.2, summary, suggestion)
+		return withDetails(fail("rspamd", "Rspamd", -1.2, summary, suggestion), details)
 	case "add header", "rewrite subject", "greylist":
-		return warn("rspamd", "Rspamd", -0.6, summary, suggestion)
+		return withDetails(warn("rspamd", "Rspamd", -0.6, summary, suggestion), details)
 	case "no action":
-		return pass("rspamd", "Rspamd", 0.2, summary, "")
+		return withDetails(pass("rspamd", "Rspamd", 0.2, summary, ""), details)
 	default:
 		if parsed.RequiredScore > 0 && parsed.Score >= parsed.RequiredScore {
-			return warn("rspamd", "Rspamd", -0.6, summary, suggestion)
+			return withDetails(warn("rspamd", "Rspamd", -0.6, summary, suggestion), details)
 		}
-		return info("rspamd", "Rspamd", 0.0, summary, "")
+		return withDetails(info("rspamd", "Rspamd", 0.0, summary, ""), details)
 	}
 }
 

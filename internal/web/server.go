@@ -70,9 +70,18 @@ type ReportData struct {
 	Mailbox         model.Mailbox
 	Report          model.AnalysisReport
 	Statuses        map[string]int
+	CheckGroups     []ReportCheckGroup
+	HeroTitle       string
+	HeroSubtitle    string
 	PlainTextBody   string
 	HTMLSourceBody  string
 	HTMLPreviewBody string
+}
+
+type ReportCheckGroup struct {
+	Name   string
+	Hint   string
+	Checks []model.CheckResult
 }
 
 func New(cfg config.Config, st *store.Store, logger *log.Logger, metrics *telemetry.Counters) (*Server, error) {
@@ -83,7 +92,12 @@ func New(cfg config.Config, st *store.Store, logger *log.Logger, metrics *teleme
 		metrics = telemetry.New()
 	}
 	t, err := template.New("").Funcs(template.FuncMap{
-		"msgref": messageReference,
+		"msgref":       messageReference,
+		"statusIcon":   statusIcon,
+		"statusLabel":  statusLabel,
+		"detailsText":  detailsText,
+		"safeID":       safeID,
+		"scorePercent": scorePercent,
 	}).ParseGlob(filepath.Join("internal", "web", "templates", "*.html"))
 	if err != nil {
 		return nil, err
@@ -351,12 +365,16 @@ func (s *Server) reportPage(w http.ResponseWriter, r *http.Request) {
 	for _, c := range selected.Report.Checks {
 		statuses[c.Status]++
 	}
+	checkGroups := groupReportChecks(selected.Report.Checks)
 	s.render(w, "report", ReportData{
 		AppName:         s.cfg.AppName,
 		Message:         selected.Message,
 		Mailbox:         mb,
 		Report:          *selected.Report,
 		Statuses:        statuses,
+		CheckGroups:     checkGroups,
+		HeroTitle:       reportHeroTitle(selected.Report.Score),
+		HeroSubtitle:    reportHeroSubtitle(selected.Report.Score),
 		PlainTextBody:   plainText,
 		HTMLSourceBody:  htmlSource,
 		HTMLPreviewBody: htmlSource,
@@ -726,6 +744,138 @@ func sortChecks(checks []model.CheckResult) {
 		}
 		return ri < rj
 	})
+}
+
+func groupReportChecks(checks []model.CheckResult) []ReportCheckGroup {
+	order := []string{"Authentifizierung", "DNS und Infrastruktur", "Spamfilter", "Format und Inhalt", "Header und Rohdaten"}
+	hints := map[string]string{
+		"Authentifizierung":     "SPF, DKIM, DMARC und sichtbare Absenderbeziehung.",
+		"DNS und Infrastruktur": "Hostnamen, Reverse DNS, MX, A/AAAA und Transport.",
+		"Spamfilter":            "Externe Filter- und Reputationssignale.",
+		"Format und Inhalt":     "MIME, Text/HTML, Links, Betreff und Anhaenge.",
+		"Header und Rohdaten":   "Transportheader und technische Basisfelder.",
+	}
+	grouped := make(map[string][]model.CheckResult)
+	for _, check := range checks {
+		category := strings.TrimSpace(check.Category)
+		if category == "" {
+			category = "Header und Rohdaten"
+		}
+		grouped[category] = append(grouped[category], check)
+	}
+	out := make([]ReportCheckGroup, 0, len(order))
+	for _, name := range order {
+		if len(grouped[name]) == 0 {
+			continue
+		}
+		out = append(out, ReportCheckGroup{Name: name, Hint: hints[name], Checks: grouped[name]})
+	}
+	return out
+}
+
+func reportHeroTitle(score float64) string {
+	switch {
+	case score >= 9:
+		return "Wow, diese Mail ist sehr gut vorbereitet"
+	case score >= 7.5:
+		return "Solide Zustellbarkeit mit kleinen Baustellen"
+	case score >= 5.5:
+		return "Diese Mail braucht technische Nacharbeit"
+	default:
+		return "Hohes Zustellbarkeitsrisiko erkannt"
+	}
+}
+
+func reportHeroSubtitle(score float64) string {
+	switch {
+	case score >= 9:
+		return "Die wichtigsten Authentifizierungs- und Inhaltschecks sehen gut aus."
+	case score >= 7.5:
+		return "Die Basis stimmt, einzelne Warnungen sollten vor groesseren Kampagnen geklaert werden."
+	case score >= 5.5:
+		return "Mehrere Signale koennen die Inbox-Platzierung bei Gmail, Outlook, Yahoo oder Apple Mail verschlechtern."
+	default:
+		return "Bitte Authentifizierung, DNS und Inhalt priorisiert korrigieren, bevor du weiter versendest."
+	}
+}
+
+func statusIcon(status string) string {
+	switch status {
+	case "pass":
+		return "OK"
+	case "warn":
+		return "!"
+	case "fail":
+		return "X"
+	default:
+		return "i"
+	}
+}
+
+func statusLabel(status string) string {
+	switch status {
+	case "pass":
+		return "Bestanden"
+	case "warn":
+		return "Warnung"
+	case "fail":
+		return "Fehler"
+	default:
+		return "Info"
+	}
+}
+
+func detailsText(details map[string]string) string {
+	if len(details) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(details))
+	for key := range details {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, key := range keys {
+		value := strings.TrimSpace(details[key])
+		if value == "" {
+			continue
+		}
+		b.WriteString(key)
+		b.WriteString(": ")
+		b.WriteString(value)
+		b.WriteByte('\n')
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func safeID(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "item"
+	}
+	return out
+}
+
+func scorePercent(score float64) float64 {
+	if score < 0 {
+		return 0
+	}
+	if score > 10 {
+		return 100
+	}
+	return score * 10
 }
 
 func messageReference(mailboxToken string, messageID int64) string {

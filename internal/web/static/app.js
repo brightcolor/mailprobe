@@ -277,6 +277,22 @@ function setupNewAddressButton() {
   button.addEventListener('click', createNewAddress);
 }
 
+function setupCopyButtons() {
+  document.querySelectorAll('[data-copy]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const ok = await writeClipboardWithFallback(button.getAttribute('data-copy') || '');
+      const original = button.textContent;
+      button.textContent = ok ? 'Kopiert' : 'Fehler';
+      button.classList.toggle('is-ok', ok);
+      button.classList.toggle('is-warn', !ok);
+      setTimeout(() => {
+        button.textContent = original;
+        button.classList.remove('is-ok', 'is-warn');
+      }, 1600);
+    });
+  });
+}
+
 function localizeStaticTimes() {
   document.querySelectorAll('[data-time]').forEach((el) => {
     el.textContent = formatExpiry(el.dataset.time);
@@ -344,5 +360,6 @@ function startMailboxPollingFallback(token, onStatus) {
 
 setupCheckButton();
 setupNewAddressButton();
+setupCopyButtons();
 localizeStaticTimes();
 setupMailboxPolling();

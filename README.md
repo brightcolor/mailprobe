@@ -38,6 +38,15 @@ This project is intentionally built for small VPS setups (including ~1 GB RAM en
 - Raw source and raw headers view
 - JSON report endpoint for automation/integrations
 
+### Report UI
+
+- Score-first dashboard with a large result hero, status counters, message metadata, and grouped diagnostics
+- Check groups for authentication, DNS/infrastructure, spam filters, content/format, and raw/header details
+- Collapsible technical sections for long diagnostics, headers, plaintext, HTML preview, HTML source, and full raw source
+- Copy-to-clipboard actions for DNS records, recommendations, headers, source, and technical values
+- Responsive layout for desktop and mobile
+- Light UI with an automatic soft dark-mode variant via `prefers-color-scheme`
+
 ### Analysis and scoring
 
 - Score from `0.0` to `10.0`
@@ -69,6 +78,16 @@ This project is intentionally built for small VPS setups (including ~1 GB RAM en
 - Optional SpamAssassin integration (disabled by default)
 - Optional Rspamd integration (disabled by default)
 - Rspamd findings include top rejecting symbols and actionable recommendations in report output
+
+Each check result is intentionally explainable. In addition to the legacy fields (`id`, `name`, `status`, `score_delta`, `summary`, `suggestion`), reports may include:
+
+- `category`: UI/report grouping, for example `Authentifizierung` or `DNS und Infrastruktur`
+- `severity`: `low`, `medium`, `high`, or `info`
+- `technical_details`: structured key/value data used for DNS records, IPs, HELO/EHLO, headers, body metrics, RBL providers, and external filter output
+- `explanation`: why this check matters for deliverability
+- `recommendation`: concrete remediation text with example DNS, MTA, or template changes where possible
+
+This is stored in the report JSON and visible in the web UI. Existing API consumers can keep reading the old fields; the new fields are additive.
 
 ## Non-goals
 

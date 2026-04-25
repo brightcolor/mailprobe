@@ -1,10 +1,14 @@
 package analyzer
 
 import (
+	"context"
 	"encoding/json"
 	"net/mail"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/brightcolor/mailprobe/internal/model"
 )
 
 func TestParseAuthResult(t *testing.T) {
@@ -96,4 +100,60 @@ func TestRspamdSuggestionFor(t *testing.T) {
 	if !(strings.Contains(s, "DKIM") || strings.Contains(s, "SPF") || strings.Contains(strings.ToLower(s), "links")) {
 		t.Fatalf("expected practical recommendation, got: %q", s)
 	}
+}
+
+func TestAnalyzeAddsStructuredCheckDetails(t *testing.T) {
+	raw := strings.Join([]string{
+		"From: Sender <sender@example.org>",
+		"To: test@example.test",
+		"Subject: Test",
+		"Message-ID: <abc@example.org>",
+		"Date: Tue, 23 Apr 2024 12:00:00 +0000",
+		"Content-Type: text/plain; charset=UTF-8",
+		"",
+		"Hello world",
+	}, "\r\n")
+	engine := New(Options{})
+	report := engine.Analyze(context.Background(), Input{
+		Message: model.Message{
+			ID:         1,
+			SMTPFrom:   "bounce@example.org",
+			RCPTTo:     "token@example.test",
+			RemoteIP:   "203.0.113.10",
+			HELO:       "mail.example.org",
+			RawSource:  raw,
+			SizeBytes:  int64(len(raw)),
+			ReceivedAt: mailDate(t, "Tue, 23 Apr 2024 12:00:00 +0000"),
+		},
+		SMTPDomain: "example.test",
+	})
+
+	if len(report.Checks) == 0 {
+		t.Fatal("expected checks")
+	}
+	var spf *model.CheckResult
+	for i := range report.Checks {
+		if report.Checks[i].ID == "spf" {
+			spf = &report.Checks[i]
+			break
+		}
+	}
+	if spf == nil {
+		t.Fatal("expected SPF check")
+	}
+	if spf.TechnicalDetails["remote_ip"] != "203.0.113.10" {
+		t.Fatalf("expected remote_ip detail, got %#v", spf.TechnicalDetails)
+	}
+	if spf.Explanation == "" || spf.Recommendation == "" || spf.Category == "" || spf.Severity == "" {
+		t.Fatalf("expected structured detail fields, got %+v", *spf)
+	}
+}
+
+func mailDate(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := mail.ParseDate(value)
+	if err != nil {
+		t.Fatalf("parse date: %v", err)
+	}
+	return parsed
 }

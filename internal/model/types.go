@@ -1,4 +1,4 @@
-﻿package model
+package model
 
 import "time"
 
@@ -27,26 +27,31 @@ type Message struct {
 }
 
 type CheckResult struct {
-	ID         string  `json:"id"`
-	Name       string  `json:"name"`
-	Status     string  `json:"status"`
-	ScoreDelta float64 `json:"score_delta"`
-	Summary    string  `json:"summary"`
-	Suggestion string  `json:"suggestion"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	Status           string            `json:"status"`
+	ScoreDelta       float64           `json:"score_delta"`
+	Summary          string            `json:"summary"`
+	Suggestion       string            `json:"suggestion"`
+	TechnicalDetails map[string]string `json:"technical_details,omitempty"`
+	Explanation      string            `json:"explanation,omitempty"`
+	Recommendation   string            `json:"recommendation,omitempty"`
+	Severity         string            `json:"severity,omitempty"`
+	Category         string            `json:"category,omitempty"`
 }
 
 type AnalysisReport struct {
-	ID          int64         `json:"id"`
-	MessageID   int64         `json:"message_id"`
-	CreatedAt   time.Time     `json:"created_at"`
-	Score       float64       `json:"score"`
-	ScoreLabel  string        `json:"score_label"`
-	Checks      []CheckResult `json:"checks"`
-	Warnings    []string      `json:"warnings"`
-	Suggestions []string      `json:"suggestions"`
+	ID          int64               `json:"id"`
+	MessageID   int64               `json:"message_id"`
+	CreatedAt   time.Time           `json:"created_at"`
+	Score       float64             `json:"score"`
+	ScoreLabel  string              `json:"score_label"`
+	Checks      []CheckResult       `json:"checks"`
+	Warnings    []string            `json:"warnings"`
+	Suggestions []string            `json:"suggestions"`
 	RawHeaders  map[string][]string `json:"raw_headers"`
-	Links       []string      `json:"links"`
-	SpamSignals []string      `json:"spam_signals"`
+	Links       []string            `json:"links"`
+	SpamSignals []string            `json:"spam_signals"`
 }
 
 type MessageWithReport struct {
