@@ -10,9 +10,11 @@
       - "${SMTP_PORT:-2525}:2525"
     volumes:
       - mailprobe_data:/data
+      # Mount certificates only when ENABLE_TLS=true, then set TLS_CERT_FILE/TLS_KEY_FILE in .env.
+      # - ./certs:/certs:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD-SHELL", "wget -qO- \"$${HEALTHCHECK_URL:-http://127.0.0.1:8080/healthz}\""]
       interval: 30s
       timeout: 5s
       retries: 3

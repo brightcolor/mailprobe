@@ -8,6 +8,10 @@ import (
 func TestLoadParsesConfiguredValues(t *testing.T) {
 	t.Setenv("APP_NAME", "ProbeX")
 	t.Setenv("HTTP_LISTEN_ADDR", ":18080")
+	t.Setenv("ENABLE_TLS", "true")
+	t.Setenv("TLS_CERT_FILE", "/certs/fullchain.pem")
+	t.Setenv("TLS_KEY_FILE", "/certs/privkey.pem")
+	t.Setenv("FORCE_HTTPS", "true")
 	t.Setenv("SMTP_LISTEN_ADDR", ":12525")
 	t.Setenv("PUBLIC_BASE_URL", "https://example.test/")
 	t.Setenv("SMTP_DOMAIN", "Mail.Example.Test")
@@ -44,6 +48,9 @@ func TestLoadParsesConfiguredValues(t *testing.T) {
 	if cfg.SMTPDomain != "mail.example.test" {
 		t.Fatalf("expected lowercased smtp domain, got %q", cfg.SMTPDomain)
 	}
+	if !cfg.EnableTLS || cfg.TLSCertFile != "/certs/fullchain.pem" || cfg.TLSKeyFile != "/certs/privkey.pem" || !cfg.ForceHTTPS {
+		t.Fatalf("unexpected tls config values: %+v", cfg)
+	}
 	if cfg.MailboxTTL != 2*time.Hour || cfg.RetentionTTL != 48*time.Hour || cfg.CleanupInterval != 15*time.Minute {
 		t.Fatalf("unexpected duration values: mailbox=%s retention=%s cleanup=%s", cfg.MailboxTTL, cfg.RetentionTTL, cfg.CleanupInterval)
 	}
@@ -76,6 +83,29 @@ func TestLoadRejectsZeroBurstLimit(t *testing.T) {
 	_, err := Load()
 	if err == nil {
 		t.Fatal("expected error for zero WEB_BURST_PER_10_SEC")
+	}
+}
+
+func TestLoadAllowsEmptyPublicURLAndSMTPDomain(t *testing.T) {
+	t.Setenv("PUBLIC_BASE_URL", "")
+	t.Setenv("SMTP_DOMAIN", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.PublicBaseURL != "" {
+		t.Fatalf("expected empty PUBLIC_BASE_URL default for request-derived URL, got %q", cfg.PublicBaseURL)
+	}
+	if cfg.SMTPDomain != "" {
+		t.Fatalf("expected empty SMTP_DOMAIN default for request-derived mailbox domain, got %q", cfg.SMTPDomain)
+	}
+}
+
+func TestLoadRejectsTLSWithoutCertificatePaths(t *testing.T) {
+	t.Setenv("ENABLE_TLS", "true")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error when ENABLE_TLS is true without TLS cert/key paths")
 	}
 }
 

@@ -11,6 +11,10 @@ import (
 type Config struct {
 	AppName              string
 	HTTPListenAddr       string
+	EnableTLS            bool
+	TLSCertFile          string
+	TLSKeyFile           string
+	ForceHTTPS           bool
 	SMTPListenAddr       string
 	PublicBaseURL        string
 	SMTPDomain           string
@@ -41,9 +45,13 @@ func Load() (Config, error) {
 	cfg := Config{
 		AppName:              getEnv("APP_NAME", "MailProbe"),
 		HTTPListenAddr:       getEnv("HTTP_LISTEN_ADDR", ":8080"),
+		EnableTLS:            getEnvBool("ENABLE_TLS", false),
+		TLSCertFile:          getEnv("TLS_CERT_FILE", ""),
+		TLSKeyFile:           getEnv("TLS_KEY_FILE", ""),
+		ForceHTTPS:           getEnvBool("FORCE_HTTPS", false),
 		SMTPListenAddr:       getEnv("SMTP_LISTEN_ADDR", ":2525"),
-		PublicBaseURL:        strings.TrimRight(getEnv("PUBLIC_BASE_URL", "http://localhost:8080"), "/"),
-		SMTPDomain:           strings.ToLower(getEnv("SMTP_DOMAIN", "mailprobe.local")),
+		PublicBaseURL:        strings.TrimRight(getEnv("PUBLIC_BASE_URL", ""), "/"),
+		SMTPDomain:           strings.ToLower(getEnv("SMTP_DOMAIN", "")),
 		DBPath:               getEnv("DB_PATH", "/data/mailprobe.db"),
 		DataDir:              getEnv("DATA_DIR", "/data"),
 		MailboxTTL:           getEnvDuration("MAILBOX_TTL", 24*time.Hour),
@@ -67,8 +75,8 @@ func Load() (Config, error) {
 		TrustedProxyCIDRs:    splitCSV(getEnv("TRUSTED_PROXY_CIDRS", "")),
 	}
 
-	if cfg.SMTPDomain == "" {
-		return cfg, fmt.Errorf("SMTP_DOMAIN must not be empty")
+	if cfg.EnableTLS && (cfg.TLSCertFile == "" || cfg.TLSKeyFile == "") {
+		return cfg, fmt.Errorf("TLS_CERT_FILE and TLS_KEY_FILE must be set when ENABLE_TLS=true")
 	}
 	if cfg.MaxMessageBytes < 512*1024 {
 		return cfg, fmt.Errorf("MAX_MESSAGE_BYTES too low, must be >= 524288")

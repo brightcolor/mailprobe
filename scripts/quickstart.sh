@@ -7,10 +7,16 @@ INSTALL_DIR="${INSTALL_DIR:-/opt/mailprobe}"
 HTTP_PORT="${HTTP_PORT:-8080}"
 SMTP_PORT="${SMTP_PORT:-2525}"
 MAILPROBE_IMAGE="${MAILPROBE_IMAGE:-ghcr.io/brightcolor/mailprobe:latest}"
-SMTP_DOMAIN="${SMTP_DOMAIN:-$(hostname -f 2>/dev/null || hostname)}"
+SMTP_DOMAIN="${SMTP_DOMAIN:-}"
 PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-}"
+ENABLE_TLS="${ENABLE_TLS:-false}"
+TLS_CERT_FILE="${TLS_CERT_FILE:-}"
+TLS_KEY_FILE="${TLS_KEY_FILE:-}"
+FORCE_HTTPS="${FORCE_HTTPS:-false}"
+HEALTHCHECK_URL="${HEALTHCHECK_URL:-http://127.0.0.1:8080/healthz}"
 ENABLE_RSPAMD="${ENABLE_RSPAMD:-}"
 ENABLE_REDIS="${ENABLE_REDIS:-}"
+DISPLAY_WEB_URL=""
 
 have_cmd() {
   command -v "$1" >/dev/null 2>&1
@@ -125,17 +131,13 @@ ensure_repo() {
   fi
 }
 
-infer_public_base_url() {
-  if [[ -n "$PUBLIC_BASE_URL" ]]; then
-    return
-  fi
-
+infer_display_web_url() {
   local ip
   ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
   if [[ -z "$ip" ]]; then
     ip="127.0.0.1"
   fi
-  PUBLIC_BASE_URL="http://${ip}:${HTTP_PORT}"
+  DISPLAY_WEB_URL="${PUBLIC_BASE_URL:-http://${ip}:${HTTP_PORT}}"
 }
 
 set_env_key() {
@@ -156,12 +158,17 @@ setup_env_file() {
     cp .env.example .env
   fi
 
-  infer_public_base_url
+  infer_display_web_url
 
   set_env_key "HTTP_PORT" "$HTTP_PORT"
   set_env_key "SMTP_PORT" "$SMTP_PORT"
   set_env_key "SMTP_DOMAIN" "$SMTP_DOMAIN"
   set_env_key "PUBLIC_BASE_URL" "$PUBLIC_BASE_URL"
+  set_env_key "ENABLE_TLS" "$ENABLE_TLS"
+  set_env_key "TLS_CERT_FILE" "$TLS_CERT_FILE"
+  set_env_key "TLS_KEY_FILE" "$TLS_KEY_FILE"
+  set_env_key "FORCE_HTTPS" "$FORCE_HTTPS"
+  set_env_key "HEALTHCHECK_URL" "$HEALTHCHECK_URL"
   set_env_key "MAILPROBE_IMAGE" "$MAILPROBE_IMAGE"
   set_env_key "ENABLE_RSPAMD" "$ENABLE_RSPAMD"
   set_env_key "ENABLE_REDIS" "$ENABLE_REDIS"
@@ -257,8 +264,8 @@ main() {
 MailProbe setup complete.
 
 Install path: $INSTALL_DIR
-Web URL:      $PUBLIC_BASE_URL
-SMTP target:  <token>@$SMTP_DOMAIN (mapped to host port $SMTP_PORT)
+Web URL:      $DISPLAY_WEB_URL
+SMTP target:  ${SMTP_DOMAIN:+<token>@$SMTP_DOMAIN}${SMTP_DOMAIN:-<token>@the-web-host-you-open} (mapped to host port $SMTP_PORT)
 Rspamd:       $ENABLE_RSPAMD
 Redis:        $ENABLE_REDIS
 

@@ -141,7 +141,21 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/mailbox/", s.mailboxPage)
 	mux.HandleFunc("/report/", s.reportPage)
 	mux.HandleFunc("/raw/", s.rawPage)
-	return s.withLogging(s.withRateLimit(mux))
+	return s.withLogging(s.withRateLimit(s.withHTTPSRedirect(mux)))
+}
+
+func (s *Server) withHTTPSRedirect(next http.Handler) http.Handler {
+	if !s.cfg.ForceHTTPS {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.requestScheme(r) == "https" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		target := "https://" + s.requestHost(r) + r.URL.RequestURI()
+		http.Redirect(w, r, target, http.StatusPermanentRedirect)
+	})
 }
 
 func (s *Server) withRateLimit(next http.Handler) http.Handler {
@@ -203,7 +217,8 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie("mailprobe_mailbox"); err == nil {
 		preferredToken = strings.TrimSpace(c.Value)
 	}
-	mb, err := s.getOrCreateHomeMailbox(r.Context(), ip, preferredToken, true)
+	domain := s.requestSMTPDomain(r)
+	mb, err := s.getOrCreateHomeMailbox(r.Context(), ip, preferredToken, true, domain)
 	if err != nil {
 		if errors.Is(err, errActiveMailboxLimit) {
 			http.Error(w, "too many active mailboxes for this IP", http.StatusTooManyRequests)
@@ -220,9 +235,9 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 
 	data := HomeData{
 		AppName:   s.cfg.AppName,
-		Domain:    s.cfg.SMTPDomain,
+		Domain:    domain,
 		Mailbox:   mb,
-		PublicURL: s.cfg.PublicBaseURL,
+		PublicURL: s.publicBaseURL(r),
 	}
 	s.render(w, "home", data)
 }
@@ -257,7 +272,7 @@ func (s *Server) createMailbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, addr, err := s.generateMailboxAddress(ctx)
+	token, addr, err := s.generateMailboxAddress(ctx, s.requestSMTPDomain(r))
 	if err != nil {
 		http.Error(w, "could not create mailbox", http.StatusInternalServerError)
 		return
@@ -283,7 +298,7 @@ func (s *Server) createMailbox(w http.ResponseWriter, r *http.Request) {
 			"token":       mb.Token,
 			"address":     mb.Address,
 			"expires_at":  mb.ExpiresAt,
-			"mailbox_url": fmt.Sprintf("%s/mailbox/%s", s.cfg.PublicBaseURL, mb.Token),
+			"mailbox_url": fmt.Sprintf("%s/mailbox/%s", s.publicBaseURL(r), mb.Token),
 			"status_path": fmt.Sprintf("/api/mailboxes/%s/status", mb.Token),
 			"events_path": fmt.Sprintf("/api/mailboxes/%s/events", mb.Token),
 		})
@@ -325,7 +340,7 @@ func (s *Server) mailboxPage(w http.ResponseWriter, r *http.Request) {
 		Mailbox:   mb,
 		Messages:  msgs,
 		Now:       time.Now().UTC(),
-		PublicURL: s.cfg.PublicBaseURL,
+		PublicURL: s.publicBaseURL(r),
 	})
 }
 
@@ -617,13 +632,17 @@ func (s *Server) mailboxByID(ctx context.Context, id int64) (model.Mailbox, erro
 	return s.store.GetMailboxByID(ctx, id)
 }
 
-func (s *Server) generateMailboxAddress(ctx context.Context) (token, address string, err error) {
+func (s *Server) generateMailboxAddress(ctx context.Context, domain string) (token, address string, err error) {
+	domain = cleanDomain(domain)
+	if domain == "" {
+		domain = "mailprobe.local"
+	}
 	for i := 0; i < 8; i++ {
 		tok, e := randomToken(6)
 		if e != nil {
 			return "", "", e
 		}
-		addr := tok + "@" + s.cfg.SMTPDomain
+		addr := tok + "@" + domain
 		_, e = s.store.GetMailboxByAddress(ctx, addr)
 		if errors.Is(e, store.ErrNotFound) {
 			return tok, addr, nil
@@ -654,6 +673,101 @@ func (s *Server) clientIP(r *http.Request) string {
 		return remoteIP
 	}
 	return r.RemoteAddr
+}
+
+func (s *Server) publicBaseURL(r *http.Request) string {
+	if s.cfg.PublicBaseURL != "" {
+		return s.cfg.PublicBaseURL
+	}
+	return s.requestScheme(r) + "://" + s.requestHost(r)
+}
+
+func (s *Server) requestSMTPDomain(r *http.Request) string {
+	if domain := cleanDomain(s.cfg.SMTPDomain); domain != "" {
+		return domain
+	}
+	return cleanDomain(s.requestHost(r))
+}
+
+func (s *Server) requestScheme(r *http.Request) string {
+	if r.TLS != nil || s.cfg.EnableTLS {
+		return "https"
+	}
+	if s.isRequestFromTrustedProxy(r) {
+		if proto := firstHeaderValue(r.Header.Get("X-Forwarded-Proto")); proto == "https" || proto == "http" {
+			return proto
+		}
+		if proto := forwardedHeaderValue(r.Header.Get("Forwarded"), "proto"); proto == "https" || proto == "http" {
+			return proto
+		}
+	}
+	return "http"
+}
+
+func (s *Server) requestHost(r *http.Request) string {
+	host := strings.TrimSpace(r.Host)
+	if s.isRequestFromTrustedProxy(r) {
+		if forwardedHost := forwardedHeaderValue(r.Header.Get("Forwarded"), "host"); forwardedHost != "" {
+			host = forwardedHost
+		} else if xfHost := firstHeaderValue(r.Header.Get("X-Forwarded-Host")); xfHost != "" {
+			host = xfHost
+		}
+	}
+	host = strings.TrimSpace(strings.Trim(host, `"`))
+	host = strings.TrimPrefix(host, "http://")
+	host = strings.TrimPrefix(host, "https://")
+	if i := strings.IndexAny(host, "/?#"); i >= 0 {
+		host = host[:i]
+	}
+	if host == "" {
+		return "localhost:8080"
+	}
+	return host
+}
+
+func (s *Server) isRequestFromTrustedProxy(r *http.Request) bool {
+	return s.isTrustedProxy(remoteAddrIP(r.RemoteAddr))
+}
+
+func firstHeaderValue(header string) string {
+	for _, part := range strings.Split(header, ",") {
+		if value := strings.ToLower(strings.TrimSpace(part)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func forwardedHeaderValue(header, key string) string {
+	key = strings.ToLower(strings.TrimSpace(key))
+	for _, element := range strings.Split(header, ",") {
+		for _, pair := range strings.Split(element, ";") {
+			name, value, ok := strings.Cut(strings.TrimSpace(pair), "=")
+			if !ok || strings.ToLower(strings.TrimSpace(name)) != key {
+				continue
+			}
+			return strings.ToLower(strings.Trim(strings.TrimSpace(value), `"`))
+		}
+	}
+	return ""
+}
+
+func cleanDomain(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.TrimPrefix(value, "http://")
+	value = strings.TrimPrefix(value, "https://")
+	if strings.HasPrefix(value, "[") {
+		if i := strings.Index(value, "]"); i >= 0 {
+			return strings.Trim(value[:i+1], "[]")
+		}
+	}
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		return strings.Trim(host, "[]")
+	}
+	if i := strings.IndexAny(value, ":/?#"); i >= 0 {
+		value = value[:i]
+	}
+	return strings.Trim(value, "[]")
 }
 
 func parseTrustedProxyCIDRs(values []string) ([]*net.IPNet, error) {
@@ -931,7 +1045,7 @@ func selectMessageWithReport(token string, msgs []model.MessageWithReport, msgRe
 	return nil
 }
 
-func (s *Server) getOrCreateHomeMailbox(ctx context.Context, ip, preferredToken string, forceNew bool) (model.Mailbox, error) {
+func (s *Server) getOrCreateHomeMailbox(ctx context.Context, ip, preferredToken string, forceNew bool, domain string) (model.Mailbox, error) {
 	if !forceNew && preferredToken != "" {
 		mb, err := s.store.GetMailboxByToken(ctx, preferredToken)
 		if err == nil && time.Now().UTC().Before(mb.ExpiresAt) {
@@ -955,7 +1069,7 @@ func (s *Server) getOrCreateHomeMailbox(ctx context.Context, ip, preferredToken 
 		return model.Mailbox{}, errGlobalActiveMailboxLimit
 	}
 
-	token, addr, err := s.generateMailboxAddress(ctx)
+	token, addr, err := s.generateMailboxAddress(ctx, domain)
 	if err != nil {
 		return model.Mailbox{}, err
 	}

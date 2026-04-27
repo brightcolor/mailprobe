@@ -1,10 +1,12 @@
 package web
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/brightcolor/mailprobe/internal/config"
 	"github.com/brightcolor/mailprobe/internal/model"
 )
 
@@ -130,5 +132,68 @@ func TestClientIPUsesForwardedForFromTrustedProxy(t *testing.T) {
 
 	if got := srv.clientIP(req); got != "203.0.113.99" {
 		t.Fatalf("expected forwarded client ip, got %q", got)
+	}
+}
+
+func TestRequestDerivedPublicURLAndSMTPDomain(t *testing.T) {
+	srv := &Server{}
+	req := httptest.NewRequest("GET", "http://probe.example.test:8080/", nil)
+	req.Host = "probe.example.test:8080"
+
+	if got := srv.publicBaseURL(req); got != "http://probe.example.test:8080" {
+		t.Fatalf("expected request-derived public URL, got %q", got)
+	}
+	if got := srv.requestSMTPDomain(req); got != "probe.example.test" {
+		t.Fatalf("expected request-derived smtp domain without port, got %q", got)
+	}
+}
+
+func TestRequestURLUsesTrustedForwardedHeaders(t *testing.T) {
+	trustedProxy, err := parseTrustedProxyCIDRs([]string{"10.0.0.0/8"})
+	if err != nil {
+		t.Fatalf("parse trusted proxy cidr: %v", err)
+	}
+	srv := &Server{trustedProxy: trustedProxy}
+	req := httptest.NewRequest("GET", "http://internal:8080/", nil)
+	req.RemoteAddr = "10.1.2.3:12345"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-Forwarded-Host", "mailprobe.example.test")
+
+	if got := srv.publicBaseURL(req); got != "https://mailprobe.example.test" {
+		t.Fatalf("expected forwarded public URL, got %q", got)
+	}
+	if got := srv.requestSMTPDomain(req); got != "mailprobe.example.test" {
+		t.Fatalf("expected forwarded smtp domain, got %q", got)
+	}
+}
+
+func TestConfiguredPublicURLAndSMTPDomainOverrideRequest(t *testing.T) {
+	srv := &Server{cfg: config.Config{PublicBaseURL: "https://configured.example", SMTPDomain: "mx.example"}}
+	req := httptest.NewRequest("GET", "http://request.example/", nil)
+
+	if got := srv.publicBaseURL(req); got != "https://configured.example" {
+		t.Fatalf("expected configured public URL, got %q", got)
+	}
+	if got := srv.requestSMTPDomain(req); got != "mx.example" {
+		t.Fatalf("expected configured smtp domain, got %q", got)
+	}
+}
+
+func TestForceHTTPSRedirect(t *testing.T) {
+	srv := &Server{cfg: config.Config{ForceHTTPS: true}}
+	handler := srv.withHTTPSRedirect(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest("GET", "http://probe.example.test/report/abc", nil)
+	req.Host = "probe.example.test"
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusPermanentRedirect {
+		t.Fatalf("expected 308 redirect, got %d", rr.Code)
+	}
+	if got := rr.Header().Get("Location"); got != "https://probe.example.test/report/abc" {
+		t.Fatalf("unexpected redirect location %q", got)
 	}
 }

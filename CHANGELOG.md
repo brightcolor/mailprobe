@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added optional built-in HTTPS serving via `ENABLE_TLS`, `TLS_CERT_FILE`, and `TLS_KEY_FILE`.
+- Added configurable HTTP-to-HTTPS redirects via `FORCE_HTTPS`.
+- Added request-derived public URL and mailbox domain detection so `PUBLIC_BASE_URL` and `SMTP_DOMAIN` can stay empty by default.
 - Added local Vvveb Admin Template vendor assets (`admin.css`, Inter fonts, Apache-2.0 license) for the web UI.
 - Added explicit light/dark/auto theme switching with persisted browser preference.
 - Added structured German check detail output with `technical_details`, `explanation`, `recommendation`, `severity`, and `category` fields.
@@ -19,6 +22,8 @@ All notable changes to this project will be documented in this file.
 - Documented `TRUSTED_PROXY_CIDRS` in the environment template and README.
 
 ### Changed
+- Made `SMTP_DOMAIN` an optional override instead of a required setting; SMTP acceptance still requires an active temporary mailbox.
+- Updated quickstart defaults to leave `PUBLIC_BASE_URL` and `SMTP_DOMAIN` empty unless explicitly provided.
 - Removed visible Metrics/Health navigation from the web UI while keeping the endpoints available.
 - Removed EventSource/SSE usage in the web UI and switched mailbox/check updates to polling to avoid broken event-stream states behind proxies.
 - Removed the left sidebar from the Vvveb-based shell in favor of a top navigation layout.

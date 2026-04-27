@@ -49,3 +49,20 @@ func TestHeaderFieldUnfoldsAndDecodesSubject(t *testing.T) {
 		t.Fatalf("expected decoded folded subject, got %q", got)
 	}
 }
+
+func TestMatchesConfiguredDomainAllowsDynamicDomainWhenUnset(t *testing.T) {
+	cfg := config.Config{}
+	if !matchesConfiguredDomain(cfg, "abc@request-derived.example") {
+		t.Fatal("expected unset SMTP_DOMAIN to allow lookup-based recipient validation")
+	}
+}
+
+func TestMatchesConfiguredDomainRestrictsConfiguredDomain(t *testing.T) {
+	cfg := config.Config{SMTPDomain: "example.test"}
+	if !matchesConfiguredDomain(cfg, "abc@example.test") {
+		t.Fatal("expected configured domain to match")
+	}
+	if matchesConfiguredDomain(cfg, "abc@other.test") {
+		t.Fatal("expected different recipient domain to be rejected")
+	}
+}

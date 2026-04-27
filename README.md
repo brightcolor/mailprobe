@@ -29,7 +29,7 @@ This project is intentionally built for small VPS setups (including ~1 GB RAM en
 
 ### Mailbox and intake
 
-- Random temporary mailbox addresses (`<token>@SMTP_DOMAIN`)
+- Random temporary mailbox addresses (`<token>@<request-host>` by default, or `<token>@SMTP_DOMAIN` when configured)
 - Score-first web UI with a guided send-and-check workflow
 - New test addresses can be generated in-place without a full page reload
 - Multiple active mailboxes in parallel
@@ -147,8 +147,10 @@ Optional environment overrides for the script:
 INSTALL_DIR=/opt/mailprobe \
 HTTP_PORT=8080 \
 SMTP_PORT=2525 \
-SMTP_DOMAIN=mx-test.example.org \
-PUBLIC_BASE_URL=http://your-server-ip:8080 \
+SMTP_DOMAIN= \
+PUBLIC_BASE_URL= \
+ENABLE_TLS=false \
+FORCE_HTTPS=false \
 ENABLE_RSPAMD=false \
 ENABLE_REDIS=false \
 bash <(curl -fsSL https://raw.githubusercontent.com/brightcolor/mailprobe/main/scripts/quickstart.sh)
@@ -158,7 +160,7 @@ Manual setup:
 
 ```bash
 cp .env.example .env
-# edit: PUBLIC_BASE_URL, SMTP_DOMAIN, MAILPROBE_IMAGE, ports
+# edit: MAILPROBE_IMAGE, ports, optional TLS/proxy settings
 
 docker compose pull
 docker compose up -d
@@ -179,6 +181,7 @@ Recommended runtime setup:
 
 - Keep web behind reverse proxy/TLS (`443 -> 8080`)
 - Route SMTP `25` to container SMTP port (`2525` by default)
+- If `SMTP_DOMAIN` is empty, open the UI through the same DNS name you want in generated test addresses.
 
 See examples:
 
@@ -194,9 +197,12 @@ Copy `.env.example` and adjust.
 Important variables:
 
 - `MAILPROBE_IMAGE` (default: `ghcr.io/brightcolor/mailprobe:latest`; pin a version tag for production)
-- `PUBLIC_BASE_URL`
-- `SMTP_DOMAIN`
+- `PUBLIC_BASE_URL` (optional override; leave empty to derive scheme + host from the request)
+- `SMTP_DOMAIN` (optional override; leave empty to use the request host for generated mailbox domains)
+- `ENABLE_TLS`, `TLS_CERT_FILE`, `TLS_KEY_FILE` (optional direct TLS for the built-in web server)
+- `FORCE_HTTPS` (redirect HTTP requests to HTTPS when the app receives plain HTTP traffic)
 - `HTTP_PORT`, `SMTP_PORT`
+- `HEALTHCHECK_URL`
 - `MAX_MESSAGE_BYTES`
 - `MAILBOX_TTL`
 - `DATA_RETENTION_TTL`
@@ -212,6 +218,52 @@ Important variables:
 - `ENABLE_SPAMASSASSIN`, `SPAMASSASSIN_HOSTPORT`
 - `ENABLE_RSPAMD`, `RSPAMD_URL`, `RSPAMD_PASSWORD`
 - `ALERT_WEBHOOK_URL` (optional outbound webhook for operational alerts)
+
+### URL and domain autodetection
+
+By default, MailProbe no longer needs `PUBLIC_BASE_URL` or `SMTP_DOMAIN` in `.env`.
+The web server derives its public URL from the incoming request:
+
+- direct access: `Host` and whether the request is TLS
+- trusted proxy access: `X-Forwarded-Proto`, `X-Forwarded-Host`, or RFC `Forwarded` headers, but only when the direct proxy IP matches `TRUSTED_PROXY_CIDRS`
+
+Generated addresses use the detected request host, with the port removed.
+Example: opening `https://probe.example.org` generates addresses like `<token>@probe.example.org`.
+
+Set `SMTP_DOMAIN` when your SMTP receiving domain differs from the web host, for example:
+
+```env
+SMTP_DOMAIN=mx-test.example.org
+```
+
+SMTP is still not an open relay: the receiver only accepts addresses that already exist as active temporary mailboxes.
+
+### Built-in TLS
+
+The web server can terminate TLS directly when you do not want a reverse proxy:
+
+```env
+ENABLE_TLS=true
+TLS_CERT_FILE=/certs/fullchain.pem
+TLS_KEY_FILE=/certs/privkey.pem
+FORCE_HTTPS=false
+HEALTHCHECK_URL=https://127.0.0.1:8080/healthz
+```
+
+Mount the certificate directory in `docker-compose.yml`, for example:
+
+```yaml
+volumes:
+  - mailprobe_data:/data
+  - ./certs:/certs:ro
+```
+
+Notes:
+
+- Certificate files are only required when `ENABLE_TLS=true`.
+- With `ENABLE_TLS=true`, the configured HTTP listener speaks HTTPS directly.
+- `FORCE_HTTPS=true` is mainly useful when MailProbe receives plain HTTP behind a trusted reverse proxy or when running HTTP-only and redirecting users to the public HTTPS URL.
+- For reverse proxy deployments, keep `ENABLE_TLS=false`, terminate TLS at the proxy, and set `TRUSTED_PROXY_CIDRS` so forwarded scheme/host headers are trusted.
 
 ## Security model
 

@@ -84,7 +84,7 @@ func main() {
 	smtpBurstLimiter := ratelimit.New(time.Minute, cfg.SMTPBurstPerMin)
 	smtpSrv := &smtp.Server{
 		Addr:            cfg.SMTPListenAddr,
-		Domain:          cfg.SMTPDomain,
+		Domain:          smtpGreetingDomain(cfg),
 		MaxMessageBytes: cfg.MaxMessageBytes,
 		RateLimiter:     smtpLimiter,
 		BurstLimiter:    smtpBurstLimiter,
@@ -113,8 +113,15 @@ func main() {
 
 	errCh := make(chan error, 2)
 	go func() {
-		slogLogger.Info("http listening", "addr", cfg.HTTPListenAddr)
-		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		var err error
+		if cfg.EnableTLS {
+			slogLogger.Info("https listening", "addr", cfg.HTTPListenAddr, "cert", cfg.TLSCertFile)
+			err = httpSrv.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile)
+		} else {
+			slogLogger.Info("http listening", "addr", cfg.HTTPListenAddr)
+			err = httpSrv.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()
@@ -142,7 +149,7 @@ func main() {
 
 func processInbound(ctx context.Context, st *store.Store, engine *analyzer.Engine, cfg config.Config, logger *log.Logger, metrics *telemetry.Counters, alerter *telemetry.Alerter, rm smtp.ReceivedMail) error {
 	rcpt := strings.ToLower(strings.TrimSpace(rm.RcptTo))
-	if !strings.HasSuffix(rcpt, "@"+strings.ToLower(cfg.SMTPDomain)) {
+	if !matchesConfiguredDomain(cfg, rcpt) {
 		return nil
 	}
 	mb, err := st.GetMailboxByAddress(ctx, rcpt)
@@ -197,7 +204,7 @@ func processInbound(ctx context.Context, st *store.Store, engine *analyzer.Engin
 
 func isAllowedRecipient(ctx context.Context, st *store.Store, cfg config.Config, rcpt string) bool {
 	rcpt = strings.ToLower(strings.TrimSpace(rcpt))
-	if !strings.HasSuffix(rcpt, "@"+strings.ToLower(cfg.SMTPDomain)) {
+	if !matchesConfiguredDomain(cfg, rcpt) {
 		return false
 	}
 	mb, err := st.GetMailboxByAddress(ctx, rcpt)
@@ -205,6 +212,21 @@ func isAllowedRecipient(ctx context.Context, st *store.Store, cfg config.Config,
 		return false
 	}
 	return time.Now().UTC().Before(mb.ExpiresAt)
+}
+
+func matchesConfiguredDomain(cfg config.Config, rcpt string) bool {
+	domain := strings.ToLower(strings.TrimSpace(cfg.SMTPDomain))
+	if domain == "" {
+		return true
+	}
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(rcpt)), "@"+domain)
+}
+
+func smtpGreetingDomain(cfg config.Config) string {
+	if domain := strings.TrimSpace(cfg.SMTPDomain); domain != "" {
+		return domain
+	}
+	return "mailprobe.local"
 }
 
 func headerBlock(raw string) string {
