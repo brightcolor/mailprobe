@@ -56,8 +56,7 @@ body.mailprobe-ui {
 
 .mp-shell {
   min-height: 100vh;
-  display: grid !important;
-  grid-template-columns: 264px minmax(0, 1fr);
+  display: block !important;
 }
 
 .mp-sidebar {
@@ -156,18 +155,24 @@ body.mailprobe-ui {
 
 .mp-main {
   min-width: 0;
+  max-width: 1440px;
+  margin: 0 auto;
   padding: 1.25rem clamp(1rem, 2.4vw, 2.25rem) 3rem;
 }
 
 .mp-topbar {
   min-height: 5.25rem;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  gap: 1.25rem;
   margin: 0 0 1.25rem;
   padding: 1rem 0 1.35rem;
   border-bottom: 1px solid var(--mp-border) !important;
+}
+
+.mp-top-brand {
+  white-space: nowrap;
 }
 
 .mp-topbar h1 {
@@ -866,42 +871,11 @@ code,
 }
 
 @media (max-width: 900px) {
-  .mp-shell {
-    grid-template-columns: 1fr;
-  }
-
-  .mp-sidebar {
-    position: sticky;
-    height: auto;
-    z-index: 1020;
-    display: grid !important;
-    grid-template-columns: auto 1fr;
-    gap: 0.75rem;
-    padding: 0.75rem;
-    border-right: 0 !important;
-    border-bottom: 1px solid var(--mp-border) !important;
-  }
-
-  .mp-logo {
-    margin: 0;
-    padding: 0 !important;
-    border-bottom: 0;
-  }
-
-  .mp-sidebar .mp-nav .navbar-nav {
-    flex-direction: row !important;
-    justify-content: flex-end;
-    overflow-x: auto;
-  }
-
-  .mp-sidebar .mp-nav .nav-link {
-    white-space: nowrap;
-  }
-
   .mp-main {
     padding: 1rem;
   }
 
+  .mp-topbar,
   .mp-hero-card,
   .mp-result-hero,
   .mp-dashboard-grid {
@@ -943,22 +917,6 @@ code,
   .mp-report-side,
   .mp-technical-details div {
     grid-template-columns: 1fr;
-  }
-
-  .mp-sidebar {
-    grid-template-columns: 1fr;
-  }
-
-  .mp-logo {
-    justify-content: space-between;
-  }
-
-  .mp-sidebar .mp-nav .navbar-nav {
-    justify-content: flex-start;
-  }
-
-  .mp-sidebar .mp-nav .nav-link .title {
-    display: none;
   }
 
   .mp-result-copy h2,

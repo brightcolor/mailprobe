@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/mail"
 	"net/textproto"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -71,6 +72,8 @@ type ReportData struct {
 	Report          model.AnalysisReport
 	Statuses        map[string]int
 	CheckGroups     []ReportCheckGroup
+	LinkGroups      []ReportLinkGroup
+	LinkTotal       int
 	HeroTitle       string
 	HeroSubtitle    string
 	PlainTextBody   string
@@ -82,6 +85,12 @@ type ReportCheckGroup struct {
 	Name   string
 	Hint   string
 	Checks []model.CheckResult
+}
+
+type ReportLinkGroup struct {
+	Domain string
+	Count  int
+	Links  []string
 }
 
 func New(cfg config.Config, st *store.Store, logger *log.Logger, metrics *telemetry.Counters) (*Server, error) {
@@ -366,6 +375,7 @@ func (s *Server) reportPage(w http.ResponseWriter, r *http.Request) {
 		statuses[c.Status]++
 	}
 	checkGroups := groupReportChecks(selected.Report.Checks)
+	linkGroups := groupLinksByDomain(selected.Report.Links)
 	s.render(w, "report", ReportData{
 		AppName:         s.cfg.AppName,
 		Message:         selected.Message,
@@ -373,6 +383,8 @@ func (s *Server) reportPage(w http.ResponseWriter, r *http.Request) {
 		Report:          *selected.Report,
 		Statuses:        statuses,
 		CheckGroups:     checkGroups,
+		LinkGroups:      linkGroups,
+		LinkTotal:       len(selected.Report.Links),
 		HeroTitle:       reportHeroTitle(selected.Report.Score),
 		HeroSubtitle:    reportHeroSubtitle(selected.Report.Score),
 		PlainTextBody:   plainText,
@@ -769,6 +781,29 @@ func groupReportChecks(checks []model.CheckResult) []ReportCheckGroup {
 			continue
 		}
 		out = append(out, ReportCheckGroup{Name: name, Hint: hints[name], Checks: grouped[name]})
+	}
+	return out
+}
+
+func groupLinksByDomain(links []string) []ReportLinkGroup {
+	grouped := make(map[string][]string)
+	for _, raw := range links {
+		parsed, err := url.Parse(raw)
+		domain := "unbekannte-domain"
+		if err == nil && strings.TrimSpace(parsed.Hostname()) != "" {
+			domain = strings.ToLower(strings.TrimPrefix(parsed.Hostname(), "www."))
+		}
+		grouped[domain] = append(grouped[domain], raw)
+	}
+	domains := make([]string, 0, len(grouped))
+	for domain := range grouped {
+		domains = append(domains, domain)
+	}
+	sort.Strings(domains)
+	out := make([]ReportLinkGroup, 0, len(domains))
+	for _, domain := range domains {
+		sort.Strings(grouped[domain])
+		out = append(out, ReportLinkGroup{Domain: domain, Count: len(grouped[domain]), Links: grouped[domain]})
 	}
 	return out
 }

@@ -11,30 +11,15 @@
 </head>
 <body class="mailprobe-ui page-home">
 <div id="container" class="mp-shell">
-  <aside class="sidebar mp-sidebar">
-    <div class="logo mp-logo">
-      <a class="mp-brand" href="/" aria-label="{{.AppName}} home"><span class="mp-brand-mark">MP</span><span>{{.AppName}}</span></a>
-      <button class="btn btn-sm btn-outline-secondary mp-icon-btn" id="theme-toggle" type="button" aria-label="Theme wechseln"><span class="theme-icon">◐</span></button>
-    </div>
-    <nav class="navbar mp-nav" aria-label="Main navigation">
-      <ul class="nav navbar-nav flex-column w-100">
-        <li class="nav-item"><a class="nav-link active" href="/"><span class="mp-nav-icon">⌁</span><span class="title">Neuer Test</span></a></li>
-        <li class="nav-item"><a class="nav-link" href="#check-panel"><span class="mp-nav-icon">@</span><span class="title">Testadresse</span></a></li>
-        <li class="nav-item"><a class="nav-link" href="/metrics"><span class="mp-nav-icon">▥</span><span class="title">Metrics</span></a></li>
-        <li class="nav-item"><a class="nav-link" href="/healthz"><span class="mp-nav-icon">✓</span><span class="title">Health</span></a></li>
-      </ul>
-    </nav>
-  </aside>
-
-  <main class="main mp-main">
-    <header class="top-header mp-topbar">
+<main class="main mp-main">
+    <header class="top-header mp-topbar"><a class="mp-brand mp-top-brand" href="/"><span class="mp-brand-mark">MP</span><span>{{.AppName}}</span></a>
       <div>
         <p class="mp-eyebrow">Self-hosted deliverability lab</p>
         <h1>Teste deine E-Mail, bevor sie bei echten Empf&auml;ngern landet.</h1>
       </div>
       <div class="mp-top-actions">
         <span class="badge rounded-pill text-bg-primary">SMTP: {{.Domain}}</span>
-        <a class="btn btn-outline-secondary btn-sm" href="/metrics">Metrics</a>
+        <button class="btn btn-outline-secondary btn-sm mp-theme-text" id="theme-toggle" type="button">Theme <span class="theme-icon">AUTO</span></button>
       </div>
     </header>
 
@@ -63,8 +48,8 @@
     </section>
 
     <section class="mp-card-grid" aria-label="Pruefbereiche">
-      <article class="card mp-feature-card"><div class="card-body"><span class="mp-card-icon success">✓</span><h3>Authentifizierung</h3><p>SPF, DKIM, DMARC und Alignment mit konkreten DNS-Hinweisen.</p></div></article>
-      <article class="card mp-feature-card"><div class="card-body"><span class="mp-card-icon info">↔</span><h3>Infrastruktur</h3><p>PTR, HELO/EHLO, MX, A/AAAA, TLS und Received-Kette.</p></div></article>
+      <article class="card mp-feature-card"><div class="card-body"><span class="mp-card-icon success">OK</span><h3>Authentifizierung</h3><p>SPF, DKIM, DMARC und Alignment mit konkreten DNS-Hinweisen.</p></div></article>
+      <article class="card mp-feature-card"><div class="card-body"><span class="mp-card-icon info">DNS</span><h3>Infrastruktur</h3><p>PTR, HELO/EHLO, MX, A/AAAA, TLS und Received-Kette.</p></div></article>
       <article class="card mp-feature-card"><div class="card-body"><span class="mp-card-icon warn">!</span><h3>Content</h3><p>MIME, Plaintext, HTML, Links, Betreff und Spam-Heuristiken.</p></div></article>
       <article class="card mp-feature-card"><div class="card-body"><span class="mp-card-icon neutral">{}</span><h3>Rohdaten</h3><p>Header, Source und JSON bleiben direkt kopierbar.</p></div></article>
     </section>

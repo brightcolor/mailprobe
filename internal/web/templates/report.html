@@ -11,28 +11,13 @@
 </head>
 <body class="mailprobe-ui page-report">
 <div id="container" class="mp-shell">
-  <aside class="sidebar mp-sidebar">
-    <div class="logo mp-logo">
-      <a class="mp-brand" href="/"><span class="mp-brand-mark">MP</span><span>{{.AppName}}</span></a>
-      <button class="btn btn-sm btn-outline-secondary mp-icon-btn" id="theme-toggle" type="button" aria-label="Theme wechseln"><span class="theme-icon">◐</span></button>
-    </div>
-    <nav class="navbar mp-nav" aria-label="Main navigation">
-      <ul class="nav navbar-nav flex-column w-100">
-        <li class="nav-item"><a class="nav-link" href="/"><span class="mp-nav-icon">⌁</span><span class="title">Neuer Test</span></a></li>
-        <li class="nav-item"><a class="nav-link" href="/mailbox/{{.Mailbox.Token}}"><span class="mp-nav-icon">▤</span><span class="title">Mailbox</span></a></li>
-        <li class="nav-item"><a class="nav-link active" href="/report/{{.Mailbox.Token}}?msg={{msgref .Mailbox.Token .Message.ID}}"><span class="mp-nav-icon">◎</span><span class="title">Report</span></a></li>
-        <li class="nav-item"><a class="nav-link" href="/api/reports/{{.Mailbox.Token}}/{{msgref .Mailbox.Token .Message.ID}}" target="_blank"><span class="mp-nav-icon">{}</span><span class="title">JSON</span></a></li>
-      </ul>
-    </nav>
-  </aside>
-
-  <main class="main mp-main report-container">
-    <header class="top-header mp-topbar">
+<main class="main mp-main report-container">
+    <header class="top-header mp-topbar"><a class="mp-brand mp-top-brand" href="/"><span class="mp-brand-mark">MP</span><span>{{.AppName}}</span></a>
       <div>
         <p class="mp-eyebrow">Deliverability Report</p>
         <h1>{{.HeroTitle}}</h1>
       </div>
-      <div class="mp-top-actions">
+      <div class="mp-top-actions"><button class="btn btn-outline-secondary btn-sm mp-theme-text" id="theme-toggle" type="button">Theme <span class="theme-icon">AUTO</span></button>
         <a class="btn btn-outline-secondary btn-sm" href="/mailbox/{{.Mailbox.Token}}">Mailbox</a>
         <a class="btn btn-primary btn-sm" href="/">Neuer Test</a>
       </div>
@@ -91,9 +76,9 @@
                   </div>
                   {{end}}
                   {{if .Explanation}}<div class="mp-check-section"><h4>Erkl&auml;rung</h4><p>{{.Explanation}}</p></div>{{end}}
-                  {{if .Recommendation}}
+                  {{if and .Recommendation (or (eq .Status "warn") (eq .Status "fail"))}}
                   <div class="mp-check-section mp-solution-box">
-                    <div class="mp-section-title"><h4>Konkrete L&ouml;sung</h4><button class="btn btn-sm btn-outline-secondary" type="button" data-copy="{{.Recommendation}}">Kopieren</button></div>
+                    <div class="mp-section-title"><h4>Wie wird's gemacht?</h4><button class="btn btn-sm btn-outline-secondary" type="button" data-copy="{{.Recommendation}}">Kopieren</button></div>
                     <p>{{.Recommendation}}</p>
                   </div>
                   {{end}}
@@ -129,7 +114,28 @@
     </section>
 
     <section class="card mp-links-card">
-      <div class="card-body"><p class="mp-eyebrow">Links</p><h2>Erkannte URLs</h2>{{if .Report.Links}}<ul class="mp-clean-list mp-link-list">{{range .Report.Links}}<li><a href="{{.}}" target="_blank" rel="noopener">{{.}}</a></li>{{end}}</ul>{{else}}<p class="text-secondary">Keine Links erkannt.</p>{{end}}</div>
+      <div class="card-body">
+        <p class="mp-eyebrow">Links</p>
+        <h2>Erkannte URLs {{if .LinkTotal}}<span class="badge text-bg-secondary">{{.LinkTotal}} gesamt</span>{{end}}</h2>
+        {{if .LinkGroups}}
+        <div class="accordion mp-link-groups" id="linkGroups">
+          {{range .LinkGroups}}
+          <div class="accordion-item">
+            <h3 class="accordion-header">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#links-{{safeID .Domain}}" aria-expanded="false" aria-controls="links-{{safeID .Domain}}">
+                <span class="mp-check-title"><strong>{{.Domain}}</strong><small>{{.Count}} Link(s)</small></span>
+              </button>
+            </h3>
+            <div id="links-{{safeID .Domain}}" class="accordion-collapse collapse" data-bs-parent="#linkGroups">
+              <div class="accordion-body">
+                <ul class="mp-clean-list mp-link-list">{{range .Links}}<li><a href="{{.}}" target="_blank" rel="noopener">{{.}}</a></li>{{end}}</ul>
+              </div>
+            </div>
+          </div>
+          {{end}}
+        </div>
+        {{else}}<p class="text-secondary">Keine Links erkannt.</p>{{end}}
+      </div>
     </section>
   </main>
 </div>

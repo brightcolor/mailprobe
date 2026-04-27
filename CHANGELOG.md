@@ -19,13 +19,19 @@ All notable changes to this project will be documented in this file.
 - Documented `TRUSTED_PROXY_CIDRS` in the environment template and README.
 
 ### Changed
-- Rebuilt the home, mailbox, and report screens around a Vvveb-style sidebar/topbar dashboard shell.
+- Removed visible Metrics/Health navigation from the web UI while keeping the endpoints available.
+- Removed EventSource/SSE usage in the web UI and switched mailbox/check updates to polling to avoid broken event-stream states behind proxies.
+- Removed the left sidebar from the Vvveb-based shell in favor of a top navigation layout.
+- Show check remediation as "Wie wird's gemacht?" only for warning and failing checks.
+- Group report links by domain and show total link counts.
+- Rebuilt the home, mailbox, and report screens around a Vvveb-style topbar dashboard shell.
 - Enriched existing analysis checks with concrete remediation guidance, DNS/MTA examples, and raw values where available.
 - Grouped report checks by authentication, DNS/infrastructure, spam filters, content/format, and header/raw-data categories.
 - Redesigned the home, mailbox, and report pages into a more focused email testing workflow with prominent test address, status panels, score summary, diagnostics, and raw data sections.
 - Adjusted the web UI closer to a mail-tester-style flow: central test address, clear check button, compact metadata, and accordion-style report checks.
 
 ### Fixed
+- Extract links from decoded HTML source as well as visible text so `href` URLs are included in reports.
 - Only trust `X-Forwarded-For` when the direct client IP matches `TRUSTED_PROXY_CIDRS`, preventing spoofed client IPs from bypassing web rate limits.
 - Decode folded and RFC 2047 encoded `Subject` headers before storing message metadata.
 - Decode transfer encoding and declared charsets for displayed text and HTML mail bodies.

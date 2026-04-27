@@ -227,7 +227,7 @@ func (e *Engine) Analyze(ctx context.Context, in Input) model.AnalysisReport {
 	mimeFindings, parsedBody := inspectBody(headers, bodyBytes)
 	report.Checks = append(report.Checks, mimeFindings...)
 
-	links := extractLinks(parsedBody.AllText)
+	links := extractLinks(parsedBody.AllText + "\n" + parsedBody.HTML)
 	report.Links = dedupeSorted(links)
 	urlFindings, spamSignals := evaluateURLs(report.Links)
 	report.Checks = append(report.Checks, urlFindings...)

@@ -149,6 +149,37 @@ func TestAnalyzeAddsStructuredCheckDetails(t *testing.T) {
 	}
 }
 
+func TestAnalyzeExtractsHTMLHrefLinks(t *testing.T) {
+	raw := strings.Join([]string{
+		"From: Sender <sender@example.org>",
+		"To: test@example.test",
+		"Subject: HTML link",
+		"Message-ID: <html-link@example.org>",
+		"Date: Tue, 23 Apr 2024 12:00:00 +0000",
+		"Content-Type: text/html; charset=UTF-8",
+		"",
+		`<html><body><a href="https://example.org/path?utm_source=test">Open</a></body></html>`,
+	}, "\r\n")
+	engine := New(Options{})
+	report := engine.Analyze(context.Background(), Input{
+		Message: model.Message{
+			ID:         2,
+			SMTPFrom:   "bounce@example.org",
+			RCPTTo:     "token@example.test",
+			RemoteIP:   "203.0.113.10",
+			HELO:       "mail.example.org",
+			RawSource:  raw,
+			SizeBytes:  int64(len(raw)),
+			ReceivedAt: mailDate(t, "Tue, 23 Apr 2024 12:00:00 +0000"),
+		},
+		SMTPDomain: "example.test",
+	})
+
+	if len(report.Links) != 1 || report.Links[0] != "https://example.org/path?utm_source=test" {
+		t.Fatalf("expected href link extraction, got %#v", report.Links)
+	}
+}
+
 func mailDate(t *testing.T, value string) time.Time {
 	t.Helper()
 	parsed, err := mail.ParseDate(value)

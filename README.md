@@ -45,6 +45,8 @@ This project is intentionally built for small VPS setups (including ~1 GB RAM en
 - Check groups for authentication, DNS/infrastructure, spam filters, content/format, and raw/header details
 - Collapsible technical sections for long diagnostics, headers, plaintext, HTML preview, HTML source, and full raw source
 - Copy-to-clipboard actions for DNS records, recommendations, headers, source, and technical values
+- Remediation blocks are shown only for warning/failing checks as `Wie wird's gemacht?`
+- Detected URLs are grouped by domain with total and per-domain counts
 - Responsive layout for desktop and mobile
 - Light, dark, and auto theme mode with a UI toggle; `auto` follows `prefers-color-scheme`
 
