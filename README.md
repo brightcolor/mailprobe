@@ -43,6 +43,7 @@ This project is intentionally built for small VPS setups (including ~1 GB RAM en
 - Vvveb Admin Template based shell and visual system (Apache-2.0 vendor assets are shipped locally)
 - Score-first dashboard with a large result hero, status counters, message metadata, and grouped diagnostics
 - Check groups for authentication, DNS/infrastructure, spam filters, content/format, and raw/header details
+- Check accordions show only values relevant to the current check instead of repeating global message metadata everywhere
 - Collapsible technical sections for long diagnostics, headers, plaintext, HTML preview, HTML source, and full raw source
 - Copy-to-clipboard actions for DNS records, recommendations, headers, source, and technical values
 - Remediation blocks are shown only for warning/failing checks as `Wie wird's gemacht?`
@@ -78,6 +79,7 @@ This project is intentionally built for small VPS setups (including ~1 GB RAM en
   - Unicode obfuscation heuristics
   - Newsletter hints: List-Unsubscribe / preheader heuristics
 - Optional RBL checks (disabled by default)
+- RBL findings include checked DNSBL zones, lookup responses, TXT evidence, impact text, pre-delisting checklist, and provider-specific delisting URLs where known
 - Optional SpamAssassin integration (disabled by default)
 - Optional Rspamd integration (disabled by default)
 - Rspamd findings include top rejecting symbols and actionable recommendations in report output

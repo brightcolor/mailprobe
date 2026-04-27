@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added provider-specific RBL/DNSBL delisting guidance, lookup evidence, TXT evidence, and pre-delisting remediation steps.
 - Added optional built-in HTTPS serving via `ENABLE_TLS`, `TLS_CERT_FILE`, and `TLS_KEY_FILE`.
 - Added configurable HTTP-to-HTTPS redirects via `FORCE_HTTPS`.
 - Added request-derived public URL and mailbox domain detection so `PUBLIC_BASE_URL` and `SMTP_DOMAIN` can stay empty by default.
@@ -22,6 +23,8 @@ All notable changes to this project will be documented in this file.
 - Documented `TRUSTED_PROXY_CIDRS` in the environment template and README.
 
 ### Changed
+- Reduced repeated technical detail noise in report check accordions by attaching only check-specific values to each check.
+- Expanded explanations and remediation text for authentication, DNS/infrastructure, SpamAssassin, and RBL findings.
 - Made `SMTP_DOMAIN` an optional override instead of a required setting; SMTP acceptance still requires an active temporary mailbox.
 - Updated quickstart defaults to leave `PUBLIC_BASE_URL` and `SMTP_DOMAIN` empty unless explicitly provided.
 - Removed visible Metrics/Health navigation from the web UI while keeping the endpoints available.

@@ -432,64 +432,69 @@ func withDetails(c model.CheckResult, details map[string]string) model.CheckResu
 func enrichCheckResult(c model.CheckResult, ctx checkContext) model.CheckResult {
 	c.Category = checkCategory(c.ID)
 	c.Severity = checkSeverity(c.Status)
-	base := baseDetails(ctx)
 	if c.TechnicalDetails == nil {
-		c.TechnicalDetails = base
-	} else {
-		for key, value := range base {
-			if _, ok := c.TechnicalDetails[key]; !ok {
-				c.TechnicalDetails[key] = value
-			}
-		}
+		c.TechnicalDetails = map[string]string{}
 	}
-	addHeaderDetail(c.TechnicalDetails, "from", ctx.Headers.Get("From"))
-	addHeaderDetail(c.TechnicalDetails, "subject", ctx.Headers.Get("Subject"))
 	addCheckSpecificDetails(c.TechnicalDetails, c.ID, ctx)
 	switch c.ID {
 	case "spf":
 		c.Name = "SPF fuer " + emptyFallback(ctx.EnvelopeDomain, "Envelope-From")
+		c.TechnicalDetails["remote_ip"] = emptyFallback(ctx.Message.RemoteIP, "unknown")
+		c.TechnicalDetails["helo_ehlo"] = emptyFallback(ctx.Message.HELO, "unknown")
+		c.TechnicalDetails["envelope_from_domain"] = emptyFallback(ctx.EnvelopeDomain, "none")
+		c.TechnicalDetails["header_from_domain"] = emptyFallback(ctx.FromDomain, "none")
 		c.TechnicalDetails["spf_result"] = emptyFallback(ctx.SPFResult, "none")
 		c.TechnicalDetails["spf_records"] = joinOrNone(ctx.SPFRecords)
-		c.Explanation = "SPF legt fest, welche Server im Namen der Envelope-From-Domain senden duerfen. Gmail, Outlook und Yahoo bewerten fehlende oder fehlschlagende SPF-Ergebnisse deutlich negativ, besonders wenn DMARC aktiv ist."
+		c.Explanation = "SPF legt fest, welche Server im Namen der Envelope-From- oder Bounce-Domain senden duerfen. Empfaenger pruefen dabei die sendende IP gegen den SPF-TXT-Record dieser Domain. Gmail, Outlook, Yahoo und grosse Gateways gewichten SPF besonders stark, wenn DMARC aktiv ist oder die IP-Reputation noch schwach ist."
 		c.Recommendation = spfRecommendation(ctx)
 	case "dkim":
+		c.TechnicalDetails["header_from_domain"] = emptyFallback(ctx.FromDomain, "none")
 		c.TechnicalDetails["dkim_result"] = emptyFallback(ctx.DKIMResult, "none")
 		c.TechnicalDetails["dkim_domain"] = emptyFallback(ctx.DKIMDomain, "none")
 		c.TechnicalDetails["dkim_signature"] = emptyFallback(ctx.Headers.Get("DKIM-Signature"), "none")
-		c.Explanation = "DKIM signiert die Nachricht kryptografisch. Provider wie Gmail, Outlook, Yahoo und Apple Mail nutzen DKIM stark, um Manipulationen und spoofing zu erkennen."
+		c.Explanation = "DKIM signiert relevante Header und Body-Inhalte kryptografisch. Der empfangende Server prueft den Public Key per DNS unter dem Selector der DKIM-Signatur. Gmail, Outlook, Yahoo und Apple Mail nutzen DKIM stark, um Manipulationen, Weiterleitungsprobleme und Domain-Spoofing zu erkennen."
 		c.Recommendation = dkimRecommendation(ctx)
 	case "dmarc":
+		c.TechnicalDetails["header_from_domain"] = emptyFallback(ctx.FromDomain, "none")
+		c.TechnicalDetails["spf_result"] = emptyFallback(ctx.SPFResult, "none")
+		c.TechnicalDetails["dkim_result"] = emptyFallback(ctx.DKIMResult, "none")
+		c.TechnicalDetails["spf_aligned"] = strconv.FormatBool(ctx.AlignedSPF)
+		c.TechnicalDetails["dkim_aligned"] = strconv.FormatBool(ctx.AlignedDKIM)
 		c.TechnicalDetails["dmarc_result"] = emptyFallback(ctx.DMARCResult, "none")
 		c.TechnicalDetails["dmarc_records"] = joinOrNone(ctx.DMARCRecords)
 		c.TechnicalDetails["policy"] = emptyFallback(ctx.DMARCPolicy, "none")
-		c.Explanation = "DMARC verbindet SPF/DKIM mit der sichtbaren From-Domain. Moderne Provider erwarten fuer serioese Versanddomains mindestens eine DMARC-Policy."
+		c.Explanation = "DMARC verbindet SPF und DKIM mit der sichtbaren From-Domain. Eine Nachricht besteht DMARC, wenn SPF oder DKIM erfolgreich ist und die jeweilige Domain zur From-Domain passt. Moderne Provider erwarten fuer serioese Versanddomains mindestens eine DMARC-Policy; fuer Bulk-Mail ist DMARC praktisch Pflicht."
 		c.Recommendation = dmarcRecommendation(ctx)
 	case "ptr":
+		c.TechnicalDetails["remote_ip"] = emptyFallback(ctx.Message.RemoteIP, "unknown")
+		c.TechnicalDetails["helo_ehlo"] = emptyFallback(ctx.Message.HELO, "unknown")
 		c.TechnicalDetails["expected"] = fmt.Sprintf("IP %s -> PTR %s -> A/AAAA %s", emptyFallback(ctx.Message.RemoteIP, "unknown"), emptyFallback(ctx.Message.HELO, "mail.example.tld"), emptyFallback(ctx.Message.RemoteIP, "sender-ip"))
-		c.Explanation = "Reverse DNS zeigt, welcher Hostname zu einer sendenden IP gehoert. Viele Provider lehnen Server ohne plausiblen PTR ab oder werten sie ab."
-		c.Recommendation = fmt.Sprintf("Beim Server- oder IP-Provider den PTR der IP %s auf den Mailserver-Hostnamen setzen. Empfohlen: PTR/rDNS %s und HELO/EHLO %s. Zusaetzlich muss dieser Hostname per A/AAAA wieder auf die sendende IP zeigen.", emptyFallback(ctx.Message.RemoteIP, "<sender-ip>"), emptyFallback(ctx.Message.HELO, "mail.example.tld"), emptyFallback(ctx.Message.HELO, "mail.example.tld"))
+		c.Explanation = "Reverse DNS zeigt, welcher Hostname zu einer sendenden IP gehoert. Empfaenger erwarten, dass PTR/rDNS, HELO/EHLO und A/AAAA-Aufloesung plausibel zusammenpassen. Ohne gueltigen PTR oder bei unpassendem Hostnamen stufen insbesondere Outlook, grosse Unternehmensgateways und viele Anti-Spam-Appliances die Verbindung deutlich negativer ein."
+		c.Recommendation = fmt.Sprintf("Beim Server- oder IP-Provider den PTR der IP %s auf den tatsaechlichen Mailserver-Hostnamen setzen. Zielzustand: PTR/rDNS `%s`, HELO/EHLO `%s`, und ein A/AAAA-Record fuer `%s`, der wieder auf %s zeigt. Bei Postfix entspricht das typischerweise `myhostname = %s`; bei Exim `primary_hostname = %s`.", emptyFallback(ctx.Message.RemoteIP, "<sender-ip>"), emptyFallback(ctx.Message.HELO, "mail.example.tld"), emptyFallback(ctx.Message.HELO, "mail.example.tld"), emptyFallback(ctx.Message.HELO, "mail.example.tld"), emptyFallback(ctx.Message.RemoteIP, "<sender-ip>"), emptyFallback(ctx.Message.HELO, "mail.example.tld"), emptyFallback(ctx.Message.HELO, "mail.example.tld"))
 	case "helo":
-		c.Explanation = "HELO/EHLO ist der Name, mit dem sich der sendende Mailserver beim Empfaenger meldet. Er sollte ein stabiler FQDN sein und zum PTR passen."
-		c.Recommendation = fmt.Sprintf("Im Mailserver den SMTP-Hostname auf einen FQDN setzen, z. B. Postfix `myhostname = %s`. Der gleiche Name sollte im PTR/rDNS der IP stehen.", emptyFallback(ctx.Message.HELO, "mail.example.tld"))
+		c.TechnicalDetails["helo_ehlo"] = emptyFallback(ctx.Message.HELO, "unknown")
+		c.TechnicalDetails["remote_ip"] = emptyFallback(ctx.Message.RemoteIP, "unknown")
+		c.Explanation = "HELO/EHLO ist der Name, mit dem sich der sendende Mailserver beim Empfaenger meldet. Er sollte ein stabiler vollqualifizierter Hostname sein, nicht `localhost`, keine IP-Literal-Adresse und kein zufaelliger Containername. Provider vergleichen dieses Signal oft mit PTR/rDNS und Forward-DNS."
+		c.Recommendation = fmt.Sprintf("Im Mailserver den SMTP-Hostname auf einen FQDN setzen, z. B. Postfix `myhostname = %s` oder Exim `primary_hostname = %s`. Der gleiche Name sollte im PTR/rDNS der IP stehen und per A/AAAA auf die sendende IP %s zeigen.", emptyFallback(ctx.Message.HELO, "mail.example.tld"), emptyFallback(ctx.Message.HELO, "mail.example.tld"), emptyFallback(ctx.Message.RemoteIP, "<sender-ip>"))
 	case "mx_records":
-		c.Explanation = "MX-Records definieren, welcher Mailserver E-Mails fuer eine Domain annimmt. Fuer reine Versanddomains ist das nicht immer zwingend, verbessert aber die technische Plausibilitaet."
+		c.Explanation = "MX-Records definieren, welcher Mailserver E-Mails fuer eine Domain annimmt. Fuer reine Versanddomains ist ein MX nicht immer zwingend, aber viele Filter bewerten Domains ohne empfangbaren Rueckkanal weniger plausibel. Fuer Reply-To, Abuse-Kontakt, Bounce-Handling und DMARC-Reports ist Empfangbarkeit praktisch hilfreich."
 		if c.Recommendation == "" {
-			c.Recommendation = fmt.Sprintf("Falls %s E-Mails empfangen soll, in der DNS-Zone einen gueltigen MX-Record pflegen.", emptyFallback(ctx.FromDomain, ctx.EnvelopeDomain))
+			c.Recommendation = fmt.Sprintf("Falls `%s` E-Mails empfangen soll, in der DNS-Zone einen gueltigen MX-Record setzen, z. B. `%s. MX 10 mail.%s.`. Der MX-Hostname `mail.%s` braucht anschliessend einen passenden A/AAAA-Record.", emptyFallback(ctx.FromDomain, ctx.EnvelopeDomain), emptyFallback(ctx.FromDomain, ctx.EnvelopeDomain), emptyFallback(ctx.FromDomain, ctx.EnvelopeDomain), emptyFallback(ctx.FromDomain, ctx.EnvelopeDomain))
 		}
 	case "address_records":
-		c.Explanation = "A/AAAA-Records zeigen, auf welche IPs eine Domain zeigt. HELO-, MX- und DKIM/DMARC-nahe Hostnamen sollten sauber aufloesen."
+		c.Explanation = "A/AAAA-Records zeigen, auf welche IPs eine Domain oder ein Hostname zeigt. Mailserver-Hostnamen aus HELO/EHLO, MX-Zielen und Tracking-/Bounce-Subdomains sollten sauber aufloesen. Fehlende Forward-DNS-Aufloesung wirkt wie eine unfertige oder falsch delegierte Infrastruktur."
 		if c.Recommendation == "" {
-			c.Recommendation = "DNS-Zone pruefen und fuer verwendete Hostnamen passende A/AAAA-Records setzen."
+			c.Recommendation = fmt.Sprintf("DNS-Zone pruefen und fuer den verwendeten Hostnamen einen passenden A-Record setzen. Beispiel: `%s. A %s`. Bei IPv6 zusaetzlich AAAA setzen und PTR/rDNS fuer IPv6 ebenfalls konsistent halten.", emptyFallback(ctx.Message.HELO, "mail.example.org"), emptyFallback(ctx.Message.RemoteIP, "203.0.113.10"))
 		}
 	case "spamassassin":
-		c.Explanation = "SpamAssassin bewertet viele Inhalts-, Header- und Reputationssignale. Es ist kein globaler Standard, aber ein guter Hinweis auf klassische Spam-Muster."
+		c.Explanation = "SpamAssassin bewertet viele klassische Inhalts-, Header- und Reputationssignale. Es ist kein globaler Standard fuer Gmail oder Outlook, aber ein sehr nuetzlicher Indikator fuer typische Spam-Muster, kaputte MIME-Strukturen, fehlende Authentifizierung und auffaellige URLs."
 		if c.Recommendation == "" {
-			c.Recommendation = "Die ausgegebenen SpamAssassin-Regeln priorisieren und zuerst Authentifizierung, Betreff, Links und HTML-Struktur bereinigen."
+			c.Recommendation = "Die ausgegebenen SpamAssassin-Regeln priorisieren: zuerst Authentifizierung (SPF/DKIM/DMARC), dann IP-/RBL-Signale, danach Betreff, Links und HTML-Struktur. Bei jeder Regel den konkreten Symbolnamen im SpamAssassin-Regelwerk nachschlagen und nur die Ursache beheben, nicht blind Text verschleiern."
 		}
 	case "rbl":
-		c.Explanation = "RBLs listen IPs mit Spam-, Abuse- oder Botnet-Historie. Gmail, Outlook und andere Provider nutzen eigene Systeme, reagieren aber ebenfalls empfindlich auf IP-Reputation."
+		c.Explanation = "RBLs/DNSBLs listen IPs, die Spam, Abuse, Botnet-, Proxy- oder Angriffssignale ausgelöst haben. Grosse Mailboxprovider nutzen zwar eigene Reputationssysteme, aber ein Listing auf etablierten Listen ist fast immer ein Hinweis auf ein reales Infrastrukturproblem oder eine kompromittierte Quelle. Die richtige Reihenfolge ist immer: Ursache stoppen, Logs pruefen, Reputation stabilisieren, dann Delisting beantragen."
 		if c.Recommendation == "" {
-			c.Recommendation = fmt.Sprintf("Falls gelistet: Ursache abstellen, Versand stoppen, Logs pruefen und anschliessend Delisting beim jeweiligen RBL-Anbieter fuer IP %s beantragen.", emptyFallback(ctx.Message.RemoteIP, "<sender-ip>"))
+			c.Recommendation = rblGenericRecommendation(ctx.Message.RemoteIP)
 		}
 	default:
 		c.Explanation = defaultExplanation(c.ID)
@@ -503,46 +508,40 @@ func enrichCheckResult(c model.CheckResult, ctx checkContext) model.CheckResult 
 	return c
 }
 
-func baseDetails(ctx checkContext) map[string]string {
-	return map[string]string{
-		"from_domain":     emptyFallback(ctx.FromDomain, "none"),
-		"envelope_domain": emptyFallback(ctx.EnvelopeDomain, "none"),
-		"remote_ip":       emptyFallback(ctx.Message.RemoteIP, "unknown"),
-		"helo_ehlo":       emptyFallback(ctx.Message.HELO, "unknown"),
-		"return_path":     emptyFallback(ctx.ReturnPath, "none"),
-		"auth_results":    joinOrNone(ctx.AuthHeaders),
-	}
-}
-
-func addHeaderDetail(details map[string]string, key, value string) {
-	if strings.TrimSpace(value) != "" {
-		details["header_"+key] = strings.TrimSpace(value)
-	}
-}
-
 func addCheckSpecificDetails(details map[string]string, id string, ctx checkContext) {
 	body := ctx.ParsedBody
 	switch id {
 	case "from_alignment":
+		details["header_from"] = emptyFallback(ctx.Headers.Get("From"), "none")
+		details["smtp_mail_from"] = emptyFallback(ctx.Message.SMTPFrom, "none")
 		details["header_from_domain"] = emptyFallback(ctx.FromDomain, "none")
 		details["envelope_from_domain"] = emptyFallback(ctx.EnvelopeDomain, "none")
 	case "return_path":
+		details["return_path"] = emptyFallback(ctx.ReturnPath, "none")
 		details["return_path_domain"] = emptyFallback(ctx.ReturnDomain, "none")
+		details["smtp_mail_from"] = emptyFallback(ctx.Message.SMTPFrom, "none")
 	case "reply_to":
+		details["header_from"] = emptyFallback(ctx.Headers.Get("From"), "none")
 		details["reply_to"] = emptyFallback(ctx.Headers.Get("Reply-To"), "none")
 	case "spf_alignment":
+		details["header_from_domain"] = emptyFallback(ctx.FromDomain, "none")
+		details["envelope_from_domain"] = emptyFallback(ctx.EnvelopeDomain, "none")
 		details["spf_result"] = emptyFallback(ctx.SPFResult, "none")
 		details["spf_aligned"] = strconv.FormatBool(ctx.AlignedSPF)
 	case "dkim_alignment":
+		details["header_from_domain"] = emptyFallback(ctx.FromDomain, "none")
 		details["dkim_result"] = emptyFallback(ctx.DKIMResult, "none")
 		details["dkim_domain"] = emptyFallback(ctx.DKIMDomain, "none")
 		details["dkim_aligned"] = strconv.FormatBool(ctx.AlignedDKIM)
 	case "dmarc_alignment":
+		details["header_from_domain"] = emptyFallback(ctx.FromDomain, "none")
 		details["spf_result"] = emptyFallback(ctx.SPFResult, "none")
 		details["dkim_result"] = emptyFallback(ctx.DKIMResult, "none")
 		details["spf_aligned"] = strconv.FormatBool(ctx.AlignedSPF)
 		details["dkim_aligned"] = strconv.FormatBool(ctx.AlignedDKIM)
 	case "received_chain", "tls_transport":
+		details["remote_ip"] = emptyFallback(ctx.Message.RemoteIP, "unknown")
+		details["helo_ehlo"] = emptyFallback(ctx.Message.HELO, "unknown")
 		details["received_count"] = strconv.Itoa(len(ctx.ReceivedLines))
 		details["received_headers"] = joinOrNone(ctx.ReceivedLines)
 	case "arc":
@@ -1156,30 +1155,164 @@ func rblHeuristics(ctx context.Context, remoteIP string, providers []string) []m
 	listed := 0
 	listedProviders := make([]string, 0)
 	cleanProviders := make([]string, 0, len(providers))
+	queryNames := make([]string, 0, len(providers))
+	listingResponses := make([]string, 0)
+	txtEvidence := make([]string, 0)
+	lookupErrors := make([]string, 0)
+	delistingSteps := make([]string, 0)
+	delistingURLs := make([]string, 0)
 	for _, p := range providers {
 		provider := strings.TrimSpace(p)
 		if provider == "" {
 			continue
 		}
-		cleanProviders = append(cleanProviders, provider)
+		meta := rblProviderMeta(provider, remoteIP)
+		cleanProviders = append(cleanProviders, fmt.Sprintf("%s (%s)", provider, meta.Name))
 		name := queryIP + "." + provider
-		ips, _ := net.DefaultResolver.LookupHost(ctx, name)
+		queryNames = append(queryNames, name)
+		lookupCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		ips, err := net.DefaultResolver.LookupHost(lookupCtx, name)
+		cancel()
+		if err != nil {
+			if dnsErr, ok := err.(*net.DNSError); ok && dnsErr.IsNotFound {
+				continue
+			}
+			lookupErrors = append(lookupErrors, fmt.Sprintf("%s: %v", provider, err))
+			continue
+		}
 		if len(ips) > 0 {
 			listed++
-			listedProviders = append(listedProviders, provider+" -> "+strings.Join(ips, ", "))
+			listedProviders = append(listedProviders, fmt.Sprintf("%s (%s)", provider, meta.Name))
+			listingResponses = append(listingResponses, provider+" -> "+strings.Join(ips, ", "))
+			txtCtx, txtCancel := context.WithTimeout(ctx, 2*time.Second)
+			txts, txtErr := net.DefaultResolver.LookupTXT(txtCtx, name)
+			txtCancel()
+			if txtErr == nil && len(txts) > 0 {
+				txtEvidence = append(txtEvidence, provider+" TXT: "+strings.Join(txts, " | "))
+			}
+			delistingSteps = append(delistingSteps, fmt.Sprintf("%s: %s", provider, meta.Delisting))
+			delistingURLs = append(delistingURLs, fmt.Sprintf("%s: %s", provider, meta.DelistURL))
 		}
 	}
 	details := map[string]string{
-		"remote_ip":         remoteIP,
-		"rbl_query_prefix":  queryIP,
-		"checked_providers": strings.Join(cleanProviders, "\n"),
-		"listed_providers":  emptyFallback(strings.Join(listedProviders, "\n"), "none"),
+		"remote_ip":             remoteIP,
+		"rbl_query_prefix":      queryIP,
+		"checked_providers":     strings.Join(cleanProviders, "\n"),
+		"query_names":           strings.Join(queryNames, "\n"),
+		"listed_providers":      emptyFallback(strings.Join(listedProviders, "\n"), "none"),
+		"listing_responses":     emptyFallback(strings.Join(listingResponses, "\n"), "none"),
+		"txt_evidence":          emptyFallback(strings.Join(txtEvidence, "\n"), "none"),
+		"lookup_errors":         emptyFallback(strings.Join(lookupErrors, "\n"), "none"),
+		"pre_delisting_checks":  rblPreDelistingChecklist(remoteIP),
+		"provider_delisting":    emptyFallback(strings.Join(delistingSteps, "\n\n"), "none"),
+		"provider_delist_urls":  emptyFallback(strings.Join(delistingURLs, "\n"), "none"),
+		"deliverability_impact": rblImpactText(listed),
 	}
 	if listed > 0 {
-		return []model.CheckResult{withDetails(warn("rbl", "DNSBL/RBL", -0.8, fmt.Sprintf("Absender-IP auf %d RBL(s) gelistet.", listed), "IP-Reputation pruefen und Delisting durchfuehren."), details)}
+		scoreDelta := -0.8
+		status := "warn"
+		if listed >= 2 {
+			scoreDelta = -1.4
+			status = "fail"
+		}
+		summary := fmt.Sprintf("Die Absender-IP %s ist auf %d der geprueften RBL(s) gelistet: %s.", remoteIP, listed, strings.Join(listedProviders, ", "))
+		rec := rblListedRecommendation(remoteIP, listedProviders)
+		if status == "fail" {
+			return []model.CheckResult{withDetails(fail("rbl", "DNSBL/RBL", scoreDelta, summary, rec), details)}
+		}
+		return []model.CheckResult{withDetails(warn("rbl", "DNSBL/RBL", scoreDelta, summary, rec), details)}
 	}
-	return []model.CheckResult{withDetails(pass("rbl", "DNSBL/RBL", 0.1, "Keine RBL-Listings in konfigurierten Listen erkannt.", ""), details)}
+	return []model.CheckResult{withDetails(pass("rbl", "DNSBL/RBL", 0.1, fmt.Sprintf("Die Absender-IP %s ist in den konfigurierten RBLs nicht gelistet.", remoteIP), ""), details)}
 }
+
+type rblProvider struct {
+	Name      string
+	DelistURL string
+	Delisting string
+}
+
+func rblProviderMeta(provider, remoteIP string) rblProvider {
+	p := strings.ToLower(strings.TrimSpace(provider))
+	switch p {
+	case "zen.spamhaus.org", "sbl.spamhaus.org", "xbl.spamhaus.org", "pbl.spamhaus.org", "sbl-xbl.spamhaus.org", "dbl.spamhaus.org":
+		return rblProvider{
+			Name:      "Spamhaus",
+			DelistURL: "https://check.spamhaus.org/",
+			Delisting: "Spamhaus Reputation Checker oeffnen, IP/Domain pruefen und die angezeigte Liste beachten. Bei SBL muss in der Regel der ISP/Provider das Abuse-Problem bestaetigt beheben und die Entfernung anstossen; bei XBL/CSS erst Malware, Proxy oder kompromittierte Accounts entfernen; bei PBL nur delisten, wenn die IP wirklich ein legitimer Mailserver ist.",
+		}
+	case "bl.spamcop.net":
+		return rblProvider{
+			Name:      "SpamCop Blocking List",
+			DelistURL: "https://www.spamcop.net/bl.shtml",
+			Delisting: "SpamCop ist zeitbasiert. Es gibt normalerweise kein manuelles Express-Delisting; nach Ende neuer Spam-Reports laeuft das Listing automatisch aus. Pruefe SpamCop-Reports, kompromittierte Accounts, offene Relays, infizierte Hosts und fehlgeleitete Bounces.",
+		}
+	case "b.barracudacentral.org", "bb.barracudacentral.org":
+		return rblProvider{
+			Name:      "Barracuda Reputation Block List",
+			DelistURL: "https://www.barracudacentral.org/rbl/removal-request",
+			Delisting: "Barracuda Removal Request mit IP, Kontaktadresse, Telefonnummer und nachvollziehbarer Ursache einreichen. Vorher Spamquelle stoppen, Queue pruefen und erklaeren, was konkret behoben wurde; Mehrfachanfragen ohne neue Informationen vermeiden.",
+		}
+	case "psbl.surriel.com":
+		return rblProvider{
+			Name:      "Passive Spam Block List",
+			DelistURL: "https://www.psbl.org/remove",
+			Delisting: "PSBL-Remove-Seite mit der IP nutzen. PSBL listet typischerweise Spamtrap-Treffer; vor Delisting Listenherkunft, Empfaengerlisten, kompromittierte Accounts und ungewollte Direktzustellung pruefen. Removal ist self-service, DNS-Propagation kann dauern.",
+		}
+	case "dnsbl.dronebl.org":
+		return rblProvider{
+			Name:      "DroneBL",
+			DelistURL: "https://www.dronebl.org/lookup",
+			Delisting: "DroneBL-Lookup ausfuehren und den dort angezeigten Instruktionen folgen. Hauefige Ursachen sind offene Proxies, Botnet-/Malware-Verkehr oder kompromittierte Hosts; diese Ursache muss vor dem Delisting beseitigt sein.",
+		}
+	case "bl.blocklist.de":
+		return rblProvider{
+			Name:      "blocklist.de",
+			DelistURL: "https://www.blocklist.de/en/delist.html?ip=" + url.QueryEscape(remoteIP),
+			Delisting: "blocklist.de delistet Angreifer-IP-Adressen nach Behebung vorzeitig ueber die Delist-Seite; sonst laeuft das Listing typischerweise automatisch aus. Vorher Logins, SSH/FTP/Web-/Mail-Bruteforce, kompromittierte Dienste und Fail2Ban-Meldungen pruefen.",
+		}
+	case "cbl.abuseat.org":
+		return rblProvider{
+			Name:      "Composite Blocking List",
+			DelistURL: "https://www.abuseat.org/lookup.cgi?ip=" + url.QueryEscape(remoteIP),
+			Delisting: "CBL-Lookup mit der IP oeffnen, Ursache lesen und erst nach Beseitigung von Malware, Proxy, Botnet-Verkehr oder kompromittierten SMTP-Zugangsdaten delisten.",
+		}
+	default:
+		return rblProvider{
+			Name:      "generische DNSBL",
+			DelistURL: "https://" + provider,
+			Delisting: "Provider-Dokumentation der DNSBL oeffnen, Listinggrund pruefen, Ursache technisch beheben und erst danach eine Entfernung beantragen. Falls keine Delisting-Seite existiert, Abuse-Kontakt des Providers oder automatische Expiry-Regeln beachten.",
+		}
+	}
+}
+
+func rblPreDelistingChecklist(remoteIP string) string {
+	return strings.Join([]string{
+		"1. Versand fuer die IP " + emptyFallback(remoteIP, "<sender-ip>") + " kurz stoppen oder stark drosseln.",
+		"2. Mailqueue, Auth-Logs, Bounce-Logs und Webform-/Newsletter-Logs auf Spamwellen pruefen.",
+		"3. Kompromittierte Accounts, offene Relays, offene Proxies, Malware und fehlgeleitete Bounces beheben.",
+		"4. SPF, DKIM, DMARC, PTR/rDNS und HELO konsistent machen.",
+		"5. Erst danach Delisting beim jeweiligen Provider beantragen und die konkrete Behebung dokumentieren.",
+	}, "\n")
+}
+
+func rblImpactText(listed int) string {
+	if listed == 0 {
+		return "Keine Listing-Treffer in den konfigurierten RBLs. Das garantiert keine gute Inbox-Platzierung, reduziert aber ein wichtiges Infrastruktur-Risiko."
+	}
+	if listed == 1 {
+		return "Ein einzelnes Listing ist ein Warnsignal. Je nach Liste kann es bei kleineren Providern direkt zu Ablehnungen fuehren und bei grossen Providern die IP-Reputation indirekt belasten."
+	}
+	return "Mehrere Listings sind ein starkes Reputationsproblem. Vor weiterem Versand sollte die Ursache behoben werden, sonst drohen Ablehnungen, Spamfolder-Platzierung und schnelle Wiederlistings."
+}
+
+func rblListedRecommendation(remoteIP string, listedProviders []string) string {
+	return fmt.Sprintf("Die IP %s ist gelistet. Stoppe zunaechst die Ursache, bevor du Delisting beantragst; sonst wird die IP meist erneut gelistet. Pruefe insbesondere kompromittierte SMTP-Accounts, offene Relay-/Proxy-Konfiguration, infizierte Webanwendungen, Spamtrap-Treffer durch alte Empfaengerlisten und fehlgeleitete Bounces. Danach pro gelisteter RBL den Delisting-Link aus den technischen Details nutzen und in der Begruendung konkret nennen, was behoben wurde. Betroffene Listen: %s.", emptyFallback(remoteIP, "<sender-ip>"), strings.Join(listedProviders, ", "))
+}
+
+func rblGenericRecommendation(remoteIP string) string {
+	return fmt.Sprintf("Wenn ein RBL-Listing auftritt: Ursache fuer IP %s zuerst abstellen, Versand temporaer stoppen, Logs und Queue pruefen, dann ueber die jeweilige Provider-Seite delisten. Ohne behobene Ursache fuehrt Delisting fast immer zu erneutem Listing.", emptyFallback(remoteIP, "<sender-ip>"))
+}
+
 func spamAssassinHeuristic(ctx context.Context, hostport, raw string) model.CheckResult {
 	details := map[string]string{"spamd_hostport": hostport}
 	d := net.Dialer{Timeout: 3 * time.Second}

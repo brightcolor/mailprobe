@@ -147,6 +147,47 @@ func TestAnalyzeAddsStructuredCheckDetails(t *testing.T) {
 	if spf.Explanation == "" || spf.Recommendation == "" || spf.Category == "" || spf.Severity == "" {
 		t.Fatalf("expected structured detail fields, got %+v", *spf)
 	}
+
+	var subject *model.CheckResult
+	for i := range report.Checks {
+		if report.Checks[i].ID == "subject" {
+			subject = &report.Checks[i]
+			break
+		}
+	}
+	if subject == nil {
+		t.Fatal("expected subject check")
+	}
+	if _, ok := subject.TechnicalDetails["remote_ip"]; ok {
+		t.Fatalf("subject check should not contain generic remote_ip detail: %#v", subject.TechnicalDetails)
+	}
+	if subject.TechnicalDetails["subject"] != "Test" {
+		t.Fatalf("expected only subject-specific details, got %#v", subject.TechnicalDetails)
+	}
+}
+
+func TestRBLProviderMetaIncludesConcreteDelisting(t *testing.T) {
+	cases := []struct {
+		provider string
+		wantURL  string
+		wantText string
+	}{
+		{"zen.spamhaus.org", "https://check.spamhaus.org/", "ISP"},
+		{"bl.spamcop.net", "https://www.spamcop.net/bl.shtml", "automatisch"},
+		{"b.barracudacentral.org", "https://www.barracudacentral.org/rbl/removal-request", "Removal Request"},
+		{"psbl.surriel.com", "https://www.psbl.org/remove", "self-service"},
+		{"dnsbl.dronebl.org", "https://www.dronebl.org/lookup", "Lookup"},
+		{"bl.blocklist.de", "https://www.blocklist.de/en/delist.html?ip=203.0.113.10", "Delist-Seite"},
+	}
+	for _, tc := range cases {
+		meta := rblProviderMeta(tc.provider, "203.0.113.10")
+		if meta.DelistURL != tc.wantURL {
+			t.Fatalf("%s delist url mismatch: got %q want %q", tc.provider, meta.DelistURL, tc.wantURL)
+		}
+		if !strings.Contains(meta.Delisting, tc.wantText) {
+			t.Fatalf("%s delisting text should contain %q, got %q", tc.provider, tc.wantText, meta.Delisting)
+		}
+	}
 }
 
 func TestAnalyzeExtractsHTMLHrefLinks(t *testing.T) {
