@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added local Vvveb Admin Template vendor assets (`admin.css`, Inter fonts, Apache-2.0 license) for the web UI.
+- Added explicit light/dark/auto theme switching with persisted browser preference.
 - Added structured German check detail output with `technical_details`, `explanation`, `recommendation`, `severity`, and `category` fields.
 - Added explicit MX, A/AAAA, SPF alignment, DKIM alignment, DMARC alignment, Reply-To, and TLS transport checks to the analyzer.
 - Added a colorful report dashboard with score hero, grouped check cards, status icons, collapsible technical details, raw-data accordions, and copy buttons.
@@ -17,6 +19,7 @@ All notable changes to this project will be documented in this file.
 - Documented `TRUSTED_PROXY_CIDRS` in the environment template and README.
 
 ### Changed
+- Rebuilt the home, mailbox, and report screens around a Vvveb-style sidebar/topbar dashboard shell.
 - Enriched existing analysis checks with concrete remediation guidance, DNS/MTA examples, and raw values where available.
 - Grouped report checks by authentication, DNS/infrastructure, spam filters, content/format, and header/raw-data categories.
 - Redesigned the home, mailbox, and report pages into a more focused email testing workflow with prominent test address, status panels, score summary, diagnostics, and raw data sections.

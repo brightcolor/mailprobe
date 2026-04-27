@@ -2,6 +2,46 @@ let mailboxPollTimer = null;
 let checkEventSource = null;
 let mailboxEventSource = null;
 
+function resolveThemePreference(preference) {
+  if (preference === 'dark' || preference === 'light') return preference;
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+  return 'light';
+}
+
+function applyThemePreference(preference) {
+  const selected = preference || localStorage.getItem('mailprobe-theme') || 'auto';
+  const resolved = resolveThemePreference(selected);
+  document.documentElement.dataset.bsTheme = resolved;
+  document.documentElement.dataset.themePreference = selected;
+
+  const icon = document.querySelector('#theme-toggle .theme-icon');
+  if (icon) {
+    icon.textContent = selected === 'auto' ? '◐' : (resolved === 'dark' ? '☾' : '☀');
+  }
+}
+
+function setupThemeToggle() {
+  applyThemePreference(localStorage.getItem('mailprobe-theme') || 'auto');
+
+  const button = document.getElementById('theme-toggle');
+  if (button) {
+    button.addEventListener('click', () => {
+      const current = document.documentElement.dataset.themePreference || 'auto';
+      const next = current === 'auto' ? 'dark' : (current === 'dark' ? 'light' : 'auto');
+      localStorage.setItem('mailprobe-theme', next);
+      applyThemePreference(next);
+    });
+  }
+
+  if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+      if ((localStorage.getItem('mailprobe-theme') || 'auto') === 'auto') {
+        applyThemePreference('auto');
+      }
+    });
+  }
+}
+
 async function copyAddress() {
   const text = document.getElementById('mail-address')?.innerText?.trim();
   if (!text) return;
@@ -358,6 +398,7 @@ function startMailboxPollingFallback(token, onStatus) {
   mailboxPollTimer = setInterval(run, 5000);
 }
 
+setupThemeToggle();
 setupCheckButton();
 setupNewAddressButton();
 setupCopyButtons();

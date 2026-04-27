@@ -20,6 +20,7 @@ coverage.out
 # Frontend tooling cache
 node_modules/
 .npm-cache/
+.tmp/
 
 # Editors
 .vscode/

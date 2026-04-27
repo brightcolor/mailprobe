@@ -40,12 +40,13 @@ This project is intentionally built for small VPS setups (including ~1 GB RAM en
 
 ### Report UI
 
+- Vvveb Admin Template based shell and visual system (Apache-2.0 vendor assets are shipped locally)
 - Score-first dashboard with a large result hero, status counters, message metadata, and grouped diagnostics
 - Check groups for authentication, DNS/infrastructure, spam filters, content/format, and raw/header details
 - Collapsible technical sections for long diagnostics, headers, plaintext, HTML preview, HTML source, and full raw source
 - Copy-to-clipboard actions for DNS records, recommendations, headers, source, and technical values
 - Responsive layout for desktop and mobile
-- Light UI with an automatic soft dark-mode variant via `prefers-color-scheme`
+- Light, dark, and auto theme mode with a UI toggle; `auto` follows `prefers-color-scheme`
 
 ### Analysis and scoring
 
@@ -103,6 +104,14 @@ This is stored in the report JSON and visible in the web UI. Existing API consum
 - `internal/store`, `internal/db`: SQLite persistence layer
 - `internal/web`: SSR pages + API endpoints
 - `internal/cleanup`: periodic TTL/retention cleanup
+
+Bundled UI vendor assets:
+
+- `internal/web/static/vendor/vvveb/admin.css`
+- `internal/web/static/vendor/vvveb/fonts/inter/*`
+- `internal/web/static/vendor/vvveb/LICENSE`
+
+The Vvveb Admin Template assets are Apache-2.0 licensed. MailProbe keeps them local to avoid third-party CDN calls.
 
 Data path:
 

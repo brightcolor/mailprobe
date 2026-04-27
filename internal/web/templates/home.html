@@ -1,90 +1,77 @@
-{{define "home"}}
+﻿{{define "home"}}
 <!doctype html>
-<html lang="de">
+<html lang="de" data-bs-theme="light">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>{{.AppName}} - Mail Deliverability Test</title>
-  <link rel="stylesheet" href="/static/vendor/bootstrap.min.css" />
+  <script>(function(){try{var p=localStorage.getItem('mailprobe-theme')||'auto';var d=p==='auto'?(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;document.documentElement.dataset.bsTheme=d;document.documentElement.dataset.themePreference=p;}catch(e){document.documentElement.dataset.bsTheme='light';}})();</script>
+  <link rel="stylesheet" href="/static/vendor/vvveb/admin.css" />
   <link rel="stylesheet" href="/static/app.css" />
 </head>
-<body>
-  <header class="topbar navbar navbar-expand-lg">
-    <div class="container-fluid px-0">
-      <a class="brand navbar-brand" href="/">{{.AppName}}</a>
-      <nav class="topbar-nav ms-auto" aria-label="Main">
-        <a href="#check-panel">Test</a>
-        <a href="/metrics">Metrics</a>
-        <a href="/healthz">Health</a>
-      </nav>
+<body class="mailprobe-ui page-home">
+<div id="container" class="mp-shell">
+  <aside class="sidebar mp-sidebar">
+    <div class="logo mp-logo">
+      <a class="mp-brand" href="/" aria-label="{{.AppName}} home"><span class="mp-brand-mark">MP</span><span>{{.AppName}}</span></a>
+      <button class="btn btn-sm btn-outline-secondary mp-icon-btn" id="theme-toggle" type="button" aria-label="Theme wechseln"><span class="theme-icon">◐</span></button>
     </div>
-  </header>
+    <nav class="navbar mp-nav" aria-label="Main navigation">
+      <ul class="nav navbar-nav flex-column w-100">
+        <li class="nav-item"><a class="nav-link active" href="/"><span class="mp-nav-icon">⌁</span><span class="title">Neuer Test</span></a></li>
+        <li class="nav-item"><a class="nav-link" href="#check-panel"><span class="mp-nav-icon">@</span><span class="title">Testadresse</span></a></li>
+        <li class="nav-item"><a class="nav-link" href="/metrics"><span class="mp-nav-icon">▥</span><span class="title">Metrics</span></a></li>
+        <li class="nav-item"><a class="nav-link" href="/healthz"><span class="mp-nav-icon">✓</span><span class="title">Health</span></a></li>
+      </ul>
+    </nav>
+  </aside>
 
-  <main class="container tester-shell">
-    <section class="tester-hero mailtester-flow" id="check-panel" data-token="{{.Mailbox.Token}}" data-public-url="{{.PublicURL}}">
-      <p class="eyebrow">Newsletter Spam Test</p>
-      <h1>Teste die Spam-Wirkung deiner E-Mail</h1>
-      <p class="lead">Sende zuerst deine E-Mail an die generierte Adresse. Danach prüft MailProbe Score, Authentifizierung, Inhalt und technische Signale.</p>
-
-      <div class="flow-step">
-        <span class="step-number">1</span>
-        <strong>Sende deine E-Mail an:</strong>
+  <main class="main mp-main">
+    <header class="top-header mp-topbar">
+      <div>
+        <p class="mp-eyebrow">Self-hosted deliverability lab</p>
+        <h1>Teste deine E-Mail, bevor sie bei echten Empf&auml;ngern landet.</h1>
       </div>
+      <div class="mp-top-actions">
+        <span class="badge rounded-pill text-bg-primary">SMTP: {{.Domain}}</span>
+        <a class="btn btn-outline-secondary btn-sm" href="/metrics">Metrics</a>
+      </div>
+    </header>
 
-      <div class="address-box address-box-large">
+    <section class="mp-hero-card" id="check-panel" data-token="{{.Mailbox.Token}}" data-public-url="{{.PublicURL}}">
+      <div class="mp-hero-copy">
+        <span class="mp-step">1</span>
+        <p class="mp-eyebrow">Empf&auml;ngeradresse</p>
+        <h2>Sende deine Testmail an diese Adresse.</h2>
+        <p class="text-secondary">Danach klickst du auf Check. MailProbe wartet live auf den Eingang und springt automatisch in den Report, sobald die Analyse fertig ist.</p>
+      </div>
+      <div class="mp-address-card">
+        <span class="mp-label">Tempor&auml;re Adresse</span>
         <code id="mail-address">{{.Mailbox.Address}}</code>
-        <button class="icon-btn copy-btn" type="button" onclick="copyAddress()" title="Adresse kopieren" aria-label="Adresse kopieren">Copy</button>
+        <button class="btn btn-primary btn-icon copy-btn" type="button" onclick="copyAddress()">Adresse kopieren</button>
       </div>
-
-      <div class="flow-step">
-        <span class="step-number">2</span>
-        <strong>Wenn die E-Mail gesendet wurde:</strong>
+      <div class="mp-action-row">
+        <button id="check-btn" class="btn btn-primary btn-lg check-score-button" type="button">Check starten</button>
+        <button id="new-address-btn" class="btn btn-outline-secondary btn-lg" type="button">Neue Adresse</button>
       </div>
-
-      <div class="primary-actions centered">
-        <button id="check-btn" class="btn primary check-score-button" type="button">Dann Score prüfen</button>
-        <button id="new-address-btn" class="btn secondary" type="button">Neue Testadresse</button>
-      </div>
-
-      <div id="check-loader" class="scan-loader d-none" aria-hidden="true">
-        <span></span><span></span><span></span>
-      </div>
-      <p id="check-status" class="check-status">Bereit für den ersten Check.</p>
-
-      <dl class="meta-list meta-list-centered">
-        <div>
-          <dt>Ablaufdatum</dt>
-          <dd id="mail-expires-at" data-time="{{.Mailbox.ExpiresAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.Mailbox.ExpiresAt.Format "02.01.2006, 15:04:05 MST"}}</dd>
-        </div>
-        <div>
-          <dt>Direktlink</dt>
-          <dd><a id="mailbox-direct-link" href="{{.PublicURL}}/mailbox/{{.Mailbox.Token}}">{{.PublicURL}}/mailbox/{{.Mailbox.Token}}</a></dd>
-        </div>
+      <div id="check-loader" class="scan-loader d-none" aria-hidden="true"><span></span><span></span><span></span></div>
+      <p id="check-status" class="check-status">Bereit. Noch wurde keine E-Mail f&uuml;r diese Adresse gepr&uuml;ft.</p>
+      <dl class="mp-meta-grid">
+        <div><dt>Ablauf</dt><dd id="mail-expires-at" data-time="{{.Mailbox.ExpiresAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.Mailbox.ExpiresAt.Format "02.01.2006, 15:04:05 MST"}}</dd></div>
+        <div><dt>Direktlink</dt><dd><a id="mailbox-direct-link" href="{{.PublicURL}}/mailbox/{{.Mailbox.Token}}">{{.PublicURL}}/mailbox/{{.Mailbox.Token}}</a></dd></div>
       </dl>
     </section>
 
-    <section class="check-grid" aria-label="Prüfbereiche">
-      <article>
-        <strong>Authentifizierung</strong>
-        <p>SPF, DKIM, DMARC und Alignment.</p>
-      </article>
-      <article>
-        <strong>Server-Signale</strong>
-        <p>PTR, HELO, Received-Kette und optional RBL.</p>
-      </article>
-      <article>
-        <strong>Content</strong>
-        <p>MIME, HTML/Text, Links und Spam-Indikatoren.</p>
-      </article>
-      <article>
-        <strong>Export</strong>
-        <p>Raw, Header und JSON für Workflows.</p>
-      </article>
+    <section class="mp-card-grid" aria-label="Pruefbereiche">
+      <article class="card mp-feature-card"><div class="card-body"><span class="mp-card-icon success">✓</span><h3>Authentifizierung</h3><p>SPF, DKIM, DMARC und Alignment mit konkreten DNS-Hinweisen.</p></div></article>
+      <article class="card mp-feature-card"><div class="card-body"><span class="mp-card-icon info">↔</span><h3>Infrastruktur</h3><p>PTR, HELO/EHLO, MX, A/AAAA, TLS und Received-Kette.</p></div></article>
+      <article class="card mp-feature-card"><div class="card-body"><span class="mp-card-icon warn">!</span><h3>Content</h3><p>MIME, Plaintext, HTML, Links, Betreff und Spam-Heuristiken.</p></div></article>
+      <article class="card mp-feature-card"><div class="card-body"><span class="mp-card-icon neutral">{}</span><h3>Rohdaten</h3><p>Header, Source und JSON bleiben direkt kopierbar.</p></div></article>
     </section>
   </main>
-
-  <script src="/static/vendor/bootstrap.bundle.min.js"></script>
-  <script src="/static/app.js"></script>
+</div>
+<script src="/static/vendor/bootstrap.bundle.min.js"></script>
+<script src="/static/app.js"></script>
 </body>
 </html>
 {{end}}
